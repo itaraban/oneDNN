@@ -271,6 +271,26 @@ dnnl_status_t DNNL_API dnnl_primitive_attr_clone(
 ///     otherwise.
 dnnl_status_t DNNL_API dnnl_primitive_attr_destroy(dnnl_primitive_attr_t attr);
 
+/// Returns probability for drop-out primitive attribute.
+///
+/// @param attr Primitive attributes.
+/// @param p Drop-out probability
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_get_dropout(
+        const_dnnl_primitive_attr_t attr,
+        float *p, const_dnnl_memory_desc_t *drop_desc);
+
+/// Sets probability for drop-out primitive attribute.
+///
+/// @param attr Primitive attributes.
+/// @param p Drop-out probability
+/// @returns #dnnl_success on success and a status describing the error
+///     otherwise.
+dnnl_status_t DNNL_API dnnl_primitive_attr_set_dropout(
+        dnnl_primitive_attr_t attr, double p,
+        const_dnnl_memory_desc_t drop_desc);
+
 /// Returns the floating-point math mode primitive attribute.
 ///
 /// @param attr Primitive attributes.

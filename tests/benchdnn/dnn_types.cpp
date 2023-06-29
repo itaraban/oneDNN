@@ -17,6 +17,7 @@
 #include <assert.h>
 #include <cctype>
 #include <cmath>
+#include <random>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -126,6 +127,7 @@ const char *data_kind2str(data_kind_t kind) {
         case WEI_ITER: return "WEI_ITER";
         case WEI_PEEPHOLE: return "WEI_PEEPHOLE";
         case WEI_PROJECTION: return "WEI_PROJECTION";
+        case DROPOUT_MASK: return "DROPOUT_MASK";
         default: assert(!"incorrect data kind");
     }
     return "incorrect data kind";
@@ -505,6 +507,7 @@ std::vector<std::pair<int, int>> attr_t::post_ops_t::get_po_masks() const {
 bool attr_t::is_def(bool skip_fpmath) const {
     return scales.is_def() && zero_points.is_def() && post_ops.is_def()
             && scratchpad_mode == get_default_scratchpad_mode()
+            && dropout.p == 0.
             && IMPLICATION(
                     !skip_fpmath, fpmath_mode == dnnl_fpmath_mode_strict);
 }
@@ -559,6 +562,21 @@ int attr_t::post_ops_t::prelu_index() const {
         if (entry[i].is_prelu_kind()) return i;
     }
     return -1;
+}
+
+int attr_t::drop_out_t::from_str(const std::string &s) {
+
+    *this = drop_out_t();
+    if (s.empty()) return OK;
+
+    size_t start_pos = 0;
+    // process policy
+    p = std::stof(parser::get_substr(s, start_pos, ':'));
+    if (start_pos == std::string::npos) return OK;
+    if (start_pos >= s.size()) return FAIL; // to catch dangling ':'
+    tag = parser::get_substr(s, start_pos, ':');
+    SAFE(check_tag(tag), WARN);
+    return OK;
 }
 
 std::ostream &operator<<(std::ostream &s, const policy_t &policy) {
@@ -672,6 +690,12 @@ std::ostream &operator<<(std::ostream &s, dnnl_fpmath_mode_t fm) {
     return s;
 }
 
+std::ostream &operator<<(std::ostream &s, const attr_t::drop_out_t &drop) {
+    s << drop.p;
+    if (drop.tag != tag::any) s << ":" << drop.tag;
+    return s;
+}
+
 std::ostream &operator<<(std::ostream &s, const attr_t &attr) {
     if (!attr.is_def()) {
         if (!attr.scales.is_def()) s << "--attr-scales=" << attr.scales << " ";
@@ -683,6 +707,8 @@ std::ostream &operator<<(std::ostream &s, const attr_t &attr) {
             s << "--attr-scratchpad=" << attr.scratchpad_mode << " ";
         if (attr.fpmath_mode != dnnl_fpmath_mode_strict)
             s << "--attr-fpmath=" << attr.fpmath_mode << " ";
+        if (attr.dropout.p != 0.)
+            s << "--attr-dropout=" << attr.dropout << " ";
     }
     return s;
 }
@@ -890,6 +916,15 @@ int attr_args_t::prepare_post_ops_mds(
         }
     }
 
+
+    // dropout
+    if (attr.dropout.p > 0.) {
+        auto drop_tensor_desc = dnn_mem_t::init_md(
+                ndims, dims,
+                dnnl_u8, attr.dropout.tag);
+        mds.emplace(DNNL_ARG_ATTR_DROP_MASK, std::move(drop_tensor_desc));
+    }
+
     return OK;
 }
 
@@ -1005,7 +1040,11 @@ dnnl_primitive_attr_t create_dnnl_attr(
 
     DNN_SAFE_V(
             dnnl_primitive_attr_set_fpmath_mode(dnnl_attr, attr.fpmath_mode));
-
+    if (attr.dropout.p > 0.) {
+        const auto &drop_mask_md = attr_args.get_md(DNNL_ARG_ATTR_DROP_MASK);
+        DNN_SAFE_V(dnnl_primitive_attr_set_dropout(
+                dnnl_attr, attr.dropout.p, drop_mask_md));
+    }
     return dnnl_attr;
 }
 

@@ -97,6 +97,17 @@ status_t zero_points_t::set(int arg, int mask) {
     return status::success;
 }
 
+status_t drop_out_t::set_default_formats(const memory_desc_t *dst_md) {
+    const memory_desc_wrapper drop_mdw(drop_desc);
+    if (drop_mdw.format_any()) {
+        const memory_desc_wrapper dst_mdw(dst_md);
+        assert(!dst_mdw.format_any());
+        CHECK(memory_desc_init_by_blocking_desc(
+                drop_desc, dst_mdw.blocking_desc()));
+    }
+    return status::success;
+}
+
 } // namespace impl
 } // namespace dnnl
 
@@ -130,6 +141,7 @@ bool primitive_attr_t::has_default_values(dnnl_primitive_attr::skip_mask_t mask,
     bool gpu_attr_ok = IMPLICATION((bool)(~mask & smask_t::gpu_attr),
             !gpu_attr_ || gpu_attr_->has_default_values());
     CHECK_ARG(gpu_attr_ok);
+    CHECK_ARG(IMPLICATION((bool)(~mask & smask_t::drop_out), drop_out_.p == 0.));
     CHECK_ARG(this->defined(defined_mask));
     return ok;
 #undef CHECK_MASK
@@ -352,6 +364,13 @@ bool post_ops_t::check_sum_consistency(const data_type_t dst_dt,
             && check_sum_consistent_quantization(dst_dt, is_int8);
 }
 
+status_t primitive_attr_t::set_dropout(
+        float p, const dnnl::impl::memory_desc_t *drop_md) {
+    drop_out_.p = p;
+    drop_out_.drop_desc = *drop_md;
+    return status::success;
+}
+
 status_t primitive_attr_t::set_fpmath_mode(fpmath_mode_t fpmath_mode) {
     auto st = check_fpmath_mode(fpmath_mode);
     if (st == success) fpmath_mode_ = fpmath_mode;
@@ -374,7 +393,9 @@ status_t primitive_attr_t::set_post_ops(const post_ops_t &post_ops) {
 }
 
 status_t primitive_attr_t::set_default_formats(const memory_desc_t *dst_md) {
-    return post_ops_.set_default_formats(dst_md);
+    CHECK(post_ops_.set_default_formats(dst_md));
+    CHECK(drop_out_.set_default_formats(dst_md));
+    return status::success;
 }
 
 status_t primitive_attr_t::set_gpu_attr(const primitive_attr_item_t &gpu_attr) {
@@ -404,6 +425,20 @@ status_t dnnl_primitive_attr_destroy(primitive_attr_t *attr) {
     delete attr;
 
     return success;
+}
+
+status_t dnnl_primitive_attr_get_dropout(const primitive_attr_t *attr, float *p,
+        const memory_desc_t **drop_mask_desc) {
+    if (any_null(attr, p)) return invalid_arguments;
+    *p = attr->drop_out_.p;
+    if (drop_mask_desc) *drop_mask_desc = &attr->drop_out_.drop_desc;
+    return success;
+}
+
+status_t dnnl_primitive_attr_set_dropout(
+        primitive_attr_t *attr, double p, const memory_desc_t *drop_mask_desc) {
+    if (any_null(attr)) return invalid_arguments;
+    return attr->set_dropout(p, drop_mask_desc);
 }
 
 status_t dnnl_primitive_attr_get_fpmath_mode(

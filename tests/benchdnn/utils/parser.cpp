@@ -466,6 +466,17 @@ bool parse_attr_scratchpad_mode(
             str2scratchpad_mode, str, option_name, help);
 }
 
+bool parse_attr_dropout(std::vector<attr_t::drop_out_t> &d,
+        const char *str,
+        const std::string &option_name /* = "attr-dropout"*/) {
+    static const std::string help
+            = "ARG:PROBABILITY[:TAG]\n    Specifies dropout probability "
+              "attribute.\n    More details at "
+              "https://github.com/oneapi-src/oneDNN/blob/master/tests/benchdnn/"
+              "doc/knobs_attr.md\n";
+    return parse_subattr(d, str, option_name, help);
+}
+
 bool parse_attr_fpmath_mode(std::vector<dnnl_fpmath_mode_t> &fpmath_mode,
         const std::vector<dnnl_fpmath_mode_t> &def_fpmath_mode, const char *str,
         const std::string &option_name /* = "attr-fpmath"*/) {

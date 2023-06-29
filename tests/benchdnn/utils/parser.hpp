@@ -230,6 +230,9 @@ bool parse_attr_scratchpad_mode(
         const std::vector<dnnl_scratchpad_mode_t> &def_scratchpad_mode,
         const char *str, const std::string &option_name = "attr-scratchpad");
 
+bool parse_attr_dropout(std::vector<attr_t::drop_out_t> &p,
+        const char *str, const std::string &option_name = "attr-dropout");
+
 bool parse_attr_fpmath_mode(std::vector<dnnl_fpmath_mode_t> &fpmath_mode,
         const std::vector<dnnl_fpmath_mode_t> &def_fpmath_mode, const char *str,
         const std::string &option_name = "attr-fpmath");

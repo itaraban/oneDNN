@@ -24,6 +24,7 @@
 #include "cpu/x64/jit_generator.hpp"
 
 #include "cpu/x64/injectors/jit_uni_eltwise_injector.hpp"
+#include "cpu/x64/injectors/jit_uni_dropout_injector.hpp"
 #include "cpu/x64/jit_uni_eltwise.hpp"
 #include "cpu/x64/utils/jit_io_helper.hpp"
 
@@ -39,7 +40,9 @@ using namespace Xbyak;
 struct jit_args_t {
     const void *src; // fwd: src;  bwd: src/dst based on alg;
     const void *dst; // fwd: dst;  bwd: diff_src;
+    const void *drop_mask; // fwd: drop_out mask
     const void *diff_dst; // fwd: nullptr;  bwd: diff_dst;
+    size_t seed;
     size_t work_amount;
 };
 
@@ -59,6 +62,7 @@ protected:
     bool is_bf16() const { return data_type() == data_type::bf16; }
     bool is_f16() const { return data_type() == data_type::f16; }
     int dtype_size() const { return types::data_type_size(data_type()); }
+    int mask_dtype_size() const { return types::data_type_size(data_type::u8); }
     cpu_isa_t get_io_isa(cpu_isa_t isa) const {
         // reusing avx512_core instantiation for bf16
         return is_bf16() && is_superset(isa, avx512_core)
@@ -79,7 +83,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         , vlen_(is_bf16() || is_f16() ? cpu_isa_traits<isa>::vlen / 2
                                       : cpu_isa_traits<isa>::vlen)
         , simd_w_(vlen_ / dtype_size())
-        , is_fwd_(pd_->is_fwd()) {
+        , is_fwd_(pd_->is_fwd()), with_dropout_(pd_->attr()->drop_out_.p > 0.0) {
 
         const auto &desc = *pd_->desc();
         // we can consider that there's no auxiliary vregs on fwd path
@@ -89,6 +93,11 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         eltwise_injector_.reset(new jit_uni_eltwise_injector_f32<isa>(this,
                 desc.alg_kind, desc.alpha, desc.beta, 1.f, save_state,
                 reg_injector_table, injector_mask, is_fwd_, pd_->use_dst()));
+
+                dropout_injector_.reset(new jit_uni_dropout_injector_f32<isa>(this,
+                pd_->attr()->drop_out_.p, save_state, reg_drop_injector_table,
+                drop_injector_mask));
+
         io::io_conf_t io_conf;
         io::io_tail_conf_t io_tail_conf(simd_w_, tail_size_, tail_opmask_idx_,
                 vmm_tail_mask.getIdx(), reg_tmp);
@@ -102,6 +111,10 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
     void compute_dst(const bool tail) {
         io_[data_type()]->load(ptr[reg_src], vmm_src, tail);
         eltwise_injector_->compute_vector(vmm_src.getIdx());
+        if (with_dropout_) {
+            dropout_injector_->compute_vector(
+                    vmm_src.getIdx(), ptr[reg_drop_mask], tail);
+        }
         if (!is_fwd_) {
             io_[data_type()]->load(ptr[reg_diff_dst], vmm_diff_dst, tail);
             uni_vmulps(vmm_src, vmm_src, vmm_diff_dst);
@@ -125,8 +138,13 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             const auto vdiff_dst
                     = i == 0 ? vmm_diff_dst_even : vmm_diff_dst_odd;
             eltwise_injector_->compute_vector(vsrc.getIdx());
+            if (with_dropout_) {
+                dropout_injector_->compute_vector(
+                        vsrc.getIdx(), ptr[reg_drop_mask + i * vlen_], tail);
+            }
             if (!is_fwd_) uni_vmulps(vsrc, vsrc, vdiff_dst);
             io_[data_type()]->store(vsrc, ptr[reg_dst + i * vlen_], tail);
+
         }
     }
 
@@ -141,6 +159,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             compute_two_simdw_xf16_dst(false);
             add(reg_src, 2 * vlen_);
             add(reg_dst, 2 * vlen_);
+            add(reg_drop_mask, 2 * vlen_);
             if (!is_fwd_) add(reg_diff_dst, 2 * vlen_);
 
             sub(reg_work_amount, 2 * simd_w_);
@@ -166,6 +185,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             compute_dst(false);
             add(reg_src, vlen_);
             add(reg_dst, vlen_);
+            add(reg_drop_mask, cpu_isa_traits<isa>::vlen / sizeof(uint32_t));
             if (!is_fwd_) add(reg_diff_dst, vlen_);
 
             sub(reg_work_amount, simd_w_);
@@ -181,6 +201,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             compute_dst(true);
             add(reg_src, dtype_size());
             add(reg_dst, dtype_size());
+            add(reg_drop_mask, mask_dtype_size());
             if (!is_fwd_) add(reg_diff_dst, dtype_size());
 
             dec(reg_work_amount);
@@ -198,9 +219,18 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         Reg64 param = abi_param1;
         mov(reg_src, ptr[param + GET_OFF(src)]);
         mov(reg_dst, ptr[param + GET_OFF(dst)]);
+        
         if (!is_fwd_) mov(reg_diff_dst, ptr[param + GET_OFF(diff_dst)]);
         mov(reg_work_amount, ptr[param + GET_OFF(work_amount)]);
         eltwise_injector_->load_table_addr();
+        if (with_dropout_) {
+            mov(reg_drop_mask, ptr[param + GET_OFF(drop_mask)]);
+            mov(reg_seed, ptr[param + GET_OFF(seed)]);
+            dropout_injector_->load_table_addr();
+            dropout_injector_->load_rng_state(vmm_drop_rng_state0.getIdx(),
+                    vmm_drop_rng_state1.getIdx(), vmm_drop_rng_state2.getIdx(),
+                    vmm_drop_rng_state3.getIdx(), reg_seed);
+        }
 
         // TODO: consider improving.
         // This piece of code is responsible for the preserve_zero function
@@ -217,6 +247,8 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         postamble();
 
         eltwise_injector_->prepare_table();
+        if (with_dropout_)
+            dropout_injector_->prepare_table();
     }
 
 private:
@@ -225,17 +257,22 @@ private:
     const int vlen_;
     const int simd_w_;
     const bool is_fwd_;
+    const bool with_dropout_;
     const int tail_size_ = 1;
 
     Reg64 reg_src = rax;
     Reg64 reg_dst = r8;
     Reg64 reg_injector_table = r9;
+    Reg64 reg_drop_injector_table = r11;
+    Reg64 reg_drop_mask = r12;
+    Reg32 reg_seed = r13d;
     Reg64 reg_diff_dst = r10;
     Reg64 reg_work_amount = rsi;
     Reg64 imm_addr64 = rbx;
     Reg64 reg_tmp = r14;
 
     Opmask injector_mask = Opmask(1);
+    Opmask drop_injector_mask = Opmask(2);
 
     Vmm vmm_src = Vmm(1);
     Vmm vmm_diff_dst = Vmm(2);
@@ -248,7 +285,13 @@ private:
     Vmm vmm_src_odd = Vmm(8);
     Vmm vmm_diff_dst_even = vmm_diff_dst;
     Vmm vmm_diff_dst_odd = Vmm(9);
+    Vmm vmm_drop_mask = Vmm(10);
+    Vmm vmm_drop_rng_state0 = Vmm(11);
+    Vmm vmm_drop_rng_state1 = Vmm(12);
+    Vmm vmm_drop_rng_state2 = Vmm(13);
+    Vmm vmm_drop_rng_state3 = Vmm(14);
     std::unique_ptr<jit_uni_eltwise_injector_f32<isa>> eltwise_injector_;
+    std::unique_ptr<jit_uni_dropout_injector_f32<isa>> dropout_injector_;
     io::jit_io_multi_dt_helper_t<Vmm> io_;
 
     /* bf16 support */
@@ -264,8 +307,9 @@ private:
 template <cpu_isa_t isa, data_type_t d_type>
 status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
     using namespace alg_kind;
-
+    using sm = primitive_attr_t::skip_mask_t;
     const memory_desc_wrapper src_d(src_md());
+    const memory_desc_wrapper mask_d(attr_.drop_out_.drop_desc);
 
     bool ok = mayiuse(isa) && is_fwd()
             && utils::everyone_is(
@@ -278,8 +322,11 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
             && eltwise_injector::is_supported(isa, desc_.alg_kind)
             // refer to a comment in jit_uni_kernel why this is needed
             && IMPLICATION(!src_d.is_dense(), is_zero_preserved())
-            && attr()->has_default_values() && set_default_formats_common()
-            && src_d == memory_desc_wrapper(dst_md());
+            && attr()->has_default_values(sm::drop_out)
+            && set_default_formats_common()
+            && src_d == memory_desc_wrapper(dst_md())
+            && IMPLICATION(attr_.drop_out_.p > 0.,
+                    src_d == mask_d);
     return ok ? status::success : status::unimplemented;
 }
 
@@ -301,6 +348,9 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         const exec_ctx_t &ctx) const {
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto dst = CTX_OUT_MEM(data_t *, DNNL_ARG_DST);
+    auto drop_mask
+            = CTX_OUT_MEM(
+            unsigned char *, DNNL_ARG_ATTR_DROP_MASK);
 
     const memory_desc_wrapper data_d(pd()->src_md());
     const auto nelems = data_d.nelems(true);
@@ -308,6 +358,7 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
 
     src += data_d.offset0();
     dst += data_d.offset0();
+    drop_mask = (drop_mask) ? drop_mask + data_d.offset0() : drop_mask;
 
     parallel(0, [&](const int ithr, const int nthr) {
         dim_t start {0}, end {0};
@@ -316,12 +367,13 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         start = nstl::min(nelems, start * simd_w);
         end = nstl::min(nelems, end * simd_w);
         if (start == end) return;
-
         jit_args_t args;
         args.src = src + start;
         args.dst = dst + start;
+        args.drop_mask = (drop_mask) ? drop_mask + start : nullptr;
         args.diff_dst = nullptr;
         args.work_amount = end - start;
+        args.seed = start;
         (*kernel_)(&args);
     });
 
@@ -395,6 +447,7 @@ status_t jit_uni_eltwise_bwd_t<isa, d_type>::execute(
         args.src = src + start;
         args.dst = diff_src + start;
         args.diff_dst = diff_dst + start;
+        args.drop_mask = nullptr;
         args.work_amount = end - start;
         (*kernel_)(&args);
     });

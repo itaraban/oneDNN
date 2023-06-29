@@ -629,6 +629,13 @@ std::ostream &operator<<(std::ostream &ss, const primitive_attr_t *attr) {
            << ";";
     }
 
+    float dropout_p = attr->drop_out_.p;
+    if (dropout_p != 0.) { 
+        ss << "attr-dropout:" << dropout_p; 
+        const auto &md = attr->drop_out_.drop_desc;
+        ss << ":" << md2fmt_tag_str(&md);
+    }
+
     return ss;
 }
 

@@ -213,6 +213,8 @@ void serialize_attr(
         int zero = 0;
         sstream.write(&zero);
     }
+    sstream.write(&attr.drop_out_.p);
+    serialize_md(sstream, attr.drop_out_.drop_desc);
 }
 
 void serialize_desc(

@@ -18,6 +18,7 @@
 #define CPU_PRIMITIVE_ATTR_POSTOPS_HPP
 
 #include <vector>
+#include <random>
 
 #include "common/primitive.hpp"
 #include "common/primitive_attr.hpp"
@@ -84,6 +85,22 @@ private:
 
     std::vector<ref_eltwise_scalar_fwd_t> eltwise_po_;
     std::vector<ref_binary_scalar_t> binary_po_;
+};
+
+struct ref_dropout_fwd_t {
+    ref_dropout_fwd_t(double p, prop_kind_t dir, int seed = 1);
+
+    float compute_scalar(float s, uint8_t *mask, dim_t offset);
+    void compute_rand(uint8_t *mask, dim_t offset);
+    float apply_scalar(float s, uint8_t *mask, dim_t offset); 
+    const double p;
+
+private:
+
+    std::random_device rd;
+    std::mt19937 gen;
+    std::bernoulli_distribution d;
+    bool training;
 };
 
 } // namespace cpu

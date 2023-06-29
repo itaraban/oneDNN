@@ -95,6 +95,7 @@ enum data_kind_t {
     WEI_ITER,
     WEI_PEEPHOLE,
     WEI_PROJECTION,
+    DROPOUT_MASK,
 
     DAT_TOTAL,
 };
@@ -365,6 +366,13 @@ struct attr_t {
         std::vector<entry_t> entry;
     };
 
+    struct drop_out_t {
+        float p = 0.f;
+        std::string tag = tag::abx;
+
+         int from_str(const std::string &s);
+    };
+
     attr_t()
         : scratchpad_mode(get_default_scratchpad_mode())
         , fpmath_mode(dnnl_fpmath_mode_strict) {}
@@ -380,6 +388,7 @@ struct attr_t {
     void insert(const post_ops_t &po) { this->post_ops = po; }
     void insert(dnnl_scratchpad_mode_t sm) { this->scratchpad_mode = sm; }
     void insert(dnnl_fpmath_mode_t fpm) { this->fpmath_mode = fpm; }
+    void insert(const drop_out_t &d) { this->dropout = d; }
 
     // When parallel creation modifier is enabled, the library scratchpad mode
     // can't be used unless "-DDNNL_ENABLE_CONCURRENT_EXEC=ON" is enabled at the
@@ -397,6 +406,7 @@ struct attr_t {
     post_ops_t post_ops;
     dnnl_scratchpad_mode_t scratchpad_mode;
     dnnl_fpmath_mode_t fpmath_mode;
+    drop_out_t dropout;
 
     bool is_def(bool skip_fpmath = false) const;
 };
@@ -510,7 +520,9 @@ std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t::kind_t &k);
 std::ostream &operator<<(std::ostream &s, const attr_t::post_ops_t &post_ops);
 std::ostream &operator<<(std::ostream &s, dnnl_scratchpad_mode_t sm);
 std::ostream &operator<<(std::ostream &s, dnnl_fpmath_mode_t fm);
+std::ostream &operator<<(std::ostream &s, const attr_t::drop_out_t &drop);
 std::ostream &operator<<(std::ostream &s, const attr_t &attr);
+
 
 // A container for additional data and info, not available from user's input at
 // parse time, but which are required to create the library attributes.

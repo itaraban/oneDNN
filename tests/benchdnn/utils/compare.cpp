@@ -148,6 +148,9 @@ int compare_t::compare_norm(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
 
     diff_norm_t diff_norm;
     const bool need_dump = verbose >= 99;
+    int64_t got_zeros = 0;
+    int64_t zeros_before_drop = 0;
+
     for (int64_t i = 0; i < nelems; ++i) {
         driver_check_func_args_t args(exp_mem, got_f32, i, dt, trh_);
 
@@ -162,8 +165,14 @@ int compare_t::compare_norm(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
             // Don't include f32->s32 saturation values into norm as they make
             // it irrelevant for validation.
             ;
+        } else if (check_dropout && args.got == 0.) {
+            ;
         } else {
             diff_norm.update(args.exp, args.got);
+            if (check_dropout) {
+                got_zeros += args.got == 0.0;
+                zeros_before_drop += args.exp == 0.0;
+            }
         }
 
         if (need_dump)
@@ -175,6 +184,19 @@ int compare_t::compare_norm(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
     bool ok = diff_norm.rel_diff(norm_t::L2) <= trh_;
     if (!ok) res->errors = 1;
 
+    if (check_dropout) {
+        double mean_got = (double)got_zeros / nelems;
+        double mean_before = (double)zeros_before_drop / nelems;
+        double got_p = (1 - mean_got)
+                / (1 - mean_before); //(mean_got - mean_before) / (1 - mean_before);
+       
+        if (fabsf(attr.dropout.p - got_p) > 1e-2f) { 
+             printf("expected %lf dropout, got %lf(mean_got: %lf, "
+                   "mean_before:%lf\n",
+                    attr.dropout.p, got_p, mean_got, mean_before);
+            res->errors = 1; 
+        }
+    }
     const bool dump = need_dump || !ok;
     if (dump) dump_norm_values(diff_norm, get_kind_str());
 
@@ -212,11 +234,16 @@ int compare_t::compare_p2p(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
     int64_t n_errors = 0;
     volatile bool from_parallel = true;
     const bool need_dump = verbose >= 99;
+    std::atomic<int64_t> got_zeros(0);
+    std::atomic<int64_t> zeros_before_drop(0);
+    std::atomic<int64_t> new_zeros(0);
+    std::atomic<int64_t> extra_count(0);
 
     const auto compare_point_values = [&](int64_t i) {
         driver_check_func_args_t args(exp_mem, got_f32, i, dt, trh_);
 
-        bool ok = args.diff == 0.f;
+        bool ok = check_dropout && args.got == 0.f || args.diff == 0.f;
+
         if (std::isnan(args.exp_f32) && is_integral_dt(dt)) {
             // Relax output requirements for this case, since different backends
             // may implement NaN fp32 -> int32 conversion in a different manner.
@@ -299,6 +326,14 @@ int compare_t::compare_p2p(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
                 ok = args.diff <= epsilon_dt(deduced_src_dt);
             }
         }
+
+        if (check_dropout) {
+            got_zeros += args.got == 0.0;
+            zeros_before_drop += args.exp == 0.0;
+            extra_count += 1;
+            new_zeros += (args.got == 0.0) & (args.exp != 0.0);
+        }
+
         // Update compare stats.
         if (from_parallel && fabsf(args.got) == 0) zeros++;
         if (from_parallel && verbose >= 6) {
@@ -318,6 +353,45 @@ int compare_t::compare_p2p(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
 
     // parallel comparison to speed up the process
     benchdnn_parallel_nd(nelems, compare_point_values);
+    //for (int64_t i = 0; i < nelems; ++i)
+    //    compare_point_values(i);
+    if (check_dropout) {
+        double mean_got = (double)got_zeros / nelems;
+        double mean_before = (double)zeros_before_drop / nelems;
+        int64_t poz_before_drop = nelems - zeros_before_drop;
+        double simulated_k = ((-attr.dropout.p * poz_before_drop + got_zeros
+                                      - zeros_before_drop)
+                                     * nelems
+                                     * (-attr.dropout.p * poz_before_drop
+                                             + got_zeros - zeros_before_drop))
+                / (attr.dropout.p * (1 - attr.dropout.p) * poz_before_drop
+                        * poz_before_drop);
+        simulated_k = sqrt(simulated_k);
+        double got_p = (mean_got - mean_before)
+                / (1 - mean_before); //(mean_got - mean_before) / (1 - mean_before);
+        double got_p2 = ((double)(got_zeros - zeros_before_drop))
+                / (nelems - zeros_before_drop);
+        double got_p3 = (double)new_zeros / (nelems - zeros_before_drop);
+        double st_error = 0.05;
+        //sqrt(attr.dropout_p * (1 - attr.dropout_p) / nelems);
+        double current_error = fabsf(attr.dropout.p - got_p);
+        int64_t diff_el = nelems - extra_count;
+        if (current_error > st_error) {
+            printf("expected %lf dropout, got %lf, got2 %lf,got3 %lf,current_error:%lf st_error:%lf, sim_k=%lf, sim_k2=%lf diff_el = %ld before=%lf\n",
+                    attr.dropout.p, got_p, got_p2, got_p3, current_error, st_error,
+                    simulated_k, current_error / st_error, diff_el,
+                    mean_before);
+            printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+            n_errors++;
+        } else {
+            printf("expected %lf dropout, got %lf, , got2 %lf, got3 %lf,current_error:%lf "
+                   "st_error:%lf, sim_k=%lf, sim_k2=%lf diff_el = %ld "
+                   "before=%lf\n",
+                    attr.dropout.p, got_p, got_p2, got_p3, current_error, st_error,
+                    simulated_k, current_error / st_error, diff_el,
+                    mean_before);
+        }
+    }
 
     // serial comparison with enabled dumping when needed for nicer output.
     if (!all_ok || need_dump) {
@@ -353,6 +427,27 @@ int compare_t::compare_p2p(const dnn_mem_t &exp_mem, const dnn_mem_t &got_mem,
     // Set PASSED if no failure in current or previous checks happened and test
     // can be trusted.
     if (res->state == EXECUTED) res->state = PASSED;
+    /*
+    double max_k = 0.0;
+    int64_t n_try = 2000;
+    int64_t try_size = 10000;
+    for (int i = 0; i < n_try; ++i) {
+        std::random_device rd_local;
+        std::mt19937 gen_local(rd_local());
+        std::bernoulli_distribution d_local(attr.dropout_p);
+        int64_t s = 0;
+
+        double st_error
+                = sqrt(attr.dropout_p * (1 - attr.dropout_p) / try_size);
+        for (int j = 0; j < try_size; ++j) {
+            s += d_local(gen_local);
+        }
+        double mean = (double)s / try_size;
+        double k_sigmas = fabsf(attr.dropout_p - mean) / st_error;
+        printf("TRY%04d - mean: %lf, z:%lf\n", i, mean, k_sigmas);
+        if (k_sigmas > max_k) max_k = k_sigmas;
+    }
+    printf("Max sigmas for %lld experimentsL %lf\n", n_try, max_k);*/
 
     return res->state == FAILED ? FAIL : OK;
 }

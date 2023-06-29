@@ -21,6 +21,7 @@
 
 #include "oneapi/dnnl/dnnl.h"
 
+#include "utils/fill.hpp"
 #include "utils/parallel.hpp"
 
 #include "dnnl_common.hpp"
@@ -349,6 +350,8 @@ void setup_cmp(compare::compare_t &cmp, const prb_t *prb, data_kind_t kind,
                 return false;
             };
     cmp.set_driver_check_function(eltwise_add_check);
+    if ((prb->dir & FLAG_FWD && !(prb->dir & FLAG_INF)) && prb->attr.dropout.p > 0.0)
+        cmp.set_dropout_check(true);
 }
 
 std::vector<int> supported_exec_args(dir_t dir) {
@@ -388,6 +391,9 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
             case DNNL_ARG_DIFF_DST:
                 SAFE(fill_data(prb, DST, mem, ref_mem), WARN);
                 break;
+            case DNNL_ARG_ATTR_DROP_MASK:
+                SAFE(fill_dropout_mask(mem, ref_mem), WARN);
+                break;
             case DNNL_ARG_SCRATCHPAD: break;
             default: { // Process all attributes here
                 int post_ops_range = DNNL_ARG_ATTR_MULTIPLE_POST_OP(31)
@@ -396,6 +402,7 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
                 if (is_post_ops_arg) {
                     SAFE(binary::fill_mem(exec_arg, mem, ref_mem), WARN);
                 }
+                //bool is_drop_out = 
             } break;
         }
         // Don't keep reference memory if it is not used further.
@@ -437,6 +444,58 @@ int check_cacheit(
     return OK;
 }
 
+void dump_point_values(const_dnnl_memory_desc_t md,
+        int64_t l_offset, float exp, float got) {
+    std::stringstream ss;
+    dims_t l_dims = md2dims(md);
+    dims_t dims_idx = off2dims_idx(l_dims, l_offset);
+    ss << dims_idx;
+    std::string ind_str = ss.str();
+
+    BENCHDNN_PRINT(0,
+            "[%4ld[DROP][%s] exp:%12g got:%12g\n",
+            (long)l_offset, ind_str.c_str(), exp,
+            got);
+}
+
+void check_dropout(const args_t &args, res_t *res) {
+    const auto &mem_src = args.find(DNNL_ARG_SRC);
+    const auto &mem_dst = args.find(DNNL_ARG_DST);
+    const auto &mem_drop = args.find(DNNL_ARG_ATTR_DROP_MASK);
+    dnn_mem_t src_f32(mem_src, dnnl_f32, tag::abx, get_cpu_engine());
+    dnn_mem_t dst_f32(mem_dst, dnnl_f32, tag::abx, get_cpu_engine());
+    dnn_mem_t drop_u8(mem_drop, dnnl_u8, tag::abx, get_cpu_engine());
+    const auto nelems = src_f32.nelems();
+    std::atomic<bool> all_ok(true);
+    volatile bool from_parallel = true;
+    const bool need_dump = verbose >= 99;
+    int64_t n_errors = 0;
+    const auto compare_point_values = [&](int64_t i) {
+        float src = src_f32.get_elem(i);
+        float dst = dst_f32.get_elem(i);
+        uint32_t drop = drop_u8.get_elem(i);
+        float exp = (drop) ? dst : 0.0;
+        bool ok = (drop) ? true : dst == 0.;
+        if (!ok && all_ok) all_ok = false;
+        if (!ok && !from_parallel) n_errors++;
+
+        const bool dump
+                = need_dump || (!ok && (n_errors < 10 || verbose >= 10));
+        if (!from_parallel && dump) dump_point_values(dst_f32.md_, i, dst, exp);
+    };
+
+    // parallel comparison to speed up the process
+    benchdnn_parallel_nd(nelems, compare_point_values);
+
+   if (!all_ok || need_dump) {
+        from_parallel = false;
+        for (int64_t i = 0; i < nelems; ++i)
+            compare_point_values(i);
+    }
+   // Set state to FAILED in case of any errors.
+    if (n_errors) res->errors = n_errors, res->state = FAILED;
+}
+
 int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
         const prb_t *prb, res_t *res) {
     const auto &prim = prb->dir & FLAG_FWD ? v_prim[0] : v_prim[1];
@@ -454,7 +513,13 @@ int doit(const std::vector<benchdnn_dnnl_wrapper_t<dnnl_primitive_t>> &v_prim,
 
     if (prb->dir & FLAG_FWD) {
         if (has_bench_mode_bit(mode_bit_t::corr)) {
-            check_correctness(prb, {DST}, args, ref_args, setup_cmp, res);
+            check_correctness(
+                    prb, {DST}, args, ref_args, setup_cmp, res);
+            if (prb->attr.dropout.p > 0) {
+                check_dropout(args, res);
+                check_correctness(prb, {DROPOUT_MASK}, args, ref_args,
+                        setup_cmp, res);
+            }
         }
     }
 

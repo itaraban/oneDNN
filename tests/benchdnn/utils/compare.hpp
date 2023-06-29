@@ -45,6 +45,7 @@ struct compare_t {
     compare_t() = default;
 
     void set_norm_validation_mode(bool un) { use_norm_ = un; }
+    void set_dropout_check(bool dp) { check_dropout = dp; }
     void set_threshold(float trh) { trh_ = trh; }
     void set_zero_trust_percent(float ztp) { zero_trust_percent_ = ztp; }
     void set_data_kind(data_kind_t dk) { kind_ = dk; }
@@ -69,6 +70,8 @@ struct compare_t {
 private:
     // Switch between point-to-point and norm comparison.
     bool use_norm_ = false;
+    // Check dropout probability
+    bool check_dropout = false;
     // Threshold for a point-to-point comparison.
     float trh_ = 0.f;
     // The percent value of zeros allowed in the output.

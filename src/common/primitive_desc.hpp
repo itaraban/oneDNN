@@ -164,6 +164,8 @@ struct primitive_desc_t : public c_compatible {
             return arg_usage_t::input;
         if (arg == DNNL_ARG_SCRATCHPAD && !is_zero_md(scratchpad_md()))
             return arg_usage_t::output;
+        if (arg == DNNL_ARG_ATTR_DROP_MASK && attr()->drop_out_.p > 0.0)
+            return arg_usage_t::output;
         for (int idx = 0; idx < attr()->post_ops_.len(); ++idx) {
             using namespace primitive_kind;
             if (post_op_has_proper_input(

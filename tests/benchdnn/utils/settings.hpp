@@ -30,6 +30,7 @@ struct base_settings_t {
     std::vector<dnnl_scratchpad_mode_t> scratchpad_mode {
             attr_t::get_default_scratchpad_mode()};
     std::vector<dnnl_fpmath_mode_t> fpmath_mode {dnnl_fpmath_mode_strict};
+    std::vector<attr_t::drop_out_t> dropout {attr_t::drop_out_t()};
     std::vector<thr_ctx_t> ctx_init {default_thr_ctx};
     std::vector<thr_ctx_t> ctx_exe {default_thr_ctx};
     const char *pattern = NULL;

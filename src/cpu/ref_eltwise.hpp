@@ -46,21 +46,25 @@ struct ref_eltwise_fwd_t : public primitive_t {
 
             const memory_desc_wrapper src_d(src_md());
             const memory_desc_wrapper dst_d(dst_md());
+            const memory_desc_wrapper mask_d(attr_.drop_out_.drop_desc);
 
             bool ok = is_fwd()
                     && utils::everyone_is(
                             data_type, src_md()->data_type, dst_md()->data_type)
                     && platform::has_data_type_support(data_type)
-                    && attr()->has_default_values(sm::post_ops)
+                    && attr()->has_default_values(sm::post_ops | sm::drop_out)
                     && ref_post_ops_t::primitive_kind_ok(attr()->post_ops_)
                     && set_default_formats_common() && src_d == dst_d
                     && attr_.set_default_formats(dst_md(0)) == status::success;
             if (!ok) return status::unimplemented;
 
+            with_drop_out = attr_.drop_out_.p > 0.;
+
             use_dense_ = src_d.is_dense(true) && dst_d.is_dense(true)
                     && IMPLICATION(!src_d.is_dense() || !dst_d.is_dense(),
-                            is_zero_preserved());
-
+                            is_zero_preserved())
+                    && IMPLICATION(with_drop_out,
+                            src_d == mask_d);
             use_nCspBc_padded_ = !use_dense_
                     && src_d.blocking_desc().inner_nblks == 1
                     && one_of(src_d.blocking_desc().inner_blks[0], 8, 16)
@@ -70,11 +74,11 @@ struct ref_eltwise_fwd_t : public primitive_t {
             const auto &po = attr()->post_ops_;
             if (has_zero_dim_memory() || !po.has_default_values())
                 use_dense_ = use_nCspBc_padded_ = false;
-
+            
             return status::success;
         }
 
-        bool use_dense_, use_nCspBc_padded_;
+        bool use_dense_, use_nCspBc_padded_, with_drop_out;
     };
 
     ref_eltwise_fwd_t(const pd_t *apd) : primitive_t(apd) {}
@@ -83,6 +87,8 @@ struct ref_eltwise_fwd_t : public primitive_t {
         ref_post_ops
                 = utils::make_unique<ref_post_ops_t>(pd()->attr()->post_ops_);
         if (!ref_post_ops) return status::out_of_memory;
+        //ref_dropout = utils::make_unique<ref_dropout_fwd_t>(
+         //       pd()->attr()->drop_out_p, pd()->get_prop_kind());
         return status::success;
     }
 
@@ -103,6 +109,7 @@ private:
     status_t execute_forward_dense(const exec_ctx_t &ctx) const;
     status_t execute_forward_generic(const exec_ctx_t &ctx) const;
     std::unique_ptr<ref_post_ops_t> ref_post_ops;
+    //thread_local std::unique_ptr<ref_dropout_fwd_t> ref_dropout;
 };
 
 template <impl::data_type_t data_type>

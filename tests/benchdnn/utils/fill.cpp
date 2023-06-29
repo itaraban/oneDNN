@@ -20,6 +20,28 @@
 #include "utils/numeric.hpp"
 #include "utils/parallel.hpp"
 
+
+int fill_dropout_mask(dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
+
+
+    const auto nelems = mem_fp.nelems();
+    if (nelems == 0) return OK;
+
+    assert(mem_dt.nelems() == mem_fp.nelems());
+
+    benchdnn_parallel_nd(
+            nelems, [&](int64_t i) { 
+            mem_dt.set_elem(i, 255);
+            mem_fp.set_elem(i, 1);
+        });
+
+
+    return OK;
+}
+
+
+
+
 int fill_scales(
         const attr_t &attr, int arg, dnn_mem_t &mem_dt, dnn_mem_t &mem_fp) {
     const auto &e = attr.scales.get(arg);
