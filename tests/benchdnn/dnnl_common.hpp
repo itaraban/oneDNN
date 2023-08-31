@@ -550,7 +550,7 @@ void check_correctness(const prb_t *prb, const std::vector<data_kind_t> &kinds,
             case WEI_ITER: arg = DNNL_ARG_DIFF_WEIGHTS_ITER; break;
             case WEI_PEEPHOLE: arg = DNNL_ARG_DIFF_WEIGHTS_PEEPHOLE; break;
             case WEI_PROJECTION: arg = DNNL_ARG_DIFF_WEIGHTS_PROJECTION; break;
-            case DROPOUT_MASK: arg = DNNL_ARG_ATTR_DROP_MASK; break;
+            case DROPOUT_MASK: arg = DNNL_ARG_ATTR_DROPOUT_MASK; break;
             default: assert(!"unsupported kind"); SAFE_V(FAIL);
         }
         const auto &mem_dt = args.find(arg);
@@ -726,23 +726,23 @@ void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
         //for (int d = 0; d < ndims; ++d) {
         //    dims[d] = query_md_dims(dst_md)[d];
         //}
-        //mem_map.emplace(DNNL_ARG_ATTR_DROP_MASK,
+        //mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_MASK,
         //        dnn_mem_t(ndims, dims, dnnl_u8, tag::axb, test_engine));
         const auto &dst_md = query_md(const_pd, DNNL_ARG_DST);
         const auto ndims = query_md_ndims(dst_md);
         const auto dims = query_md_dims(dst_md);
-        mem_map.emplace(DNNL_ARG_ATTR_DROP_MASK,
+        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_MASK,
                 dnn_mem_t(ndims, dims, dnnl_u8, prb->attr.dropout.tag,
                         test_engine));
 
 
-       // const auto &drop_md = query_md(const_pd, DNNL_ARG_ATTR_DROP_MASK);
+       // const auto &drop_md = query_md(const_pd, DNNL_ARG_ATTR_DROPOUT_MASK);
         //dnn_mem_t drop_m =;
         //dnnl_memory_desc_set_data_type(md_, dnnl_u8);
         //.set_dt(dnnl_u8);
        // mem_map.emplace(
-       //         DNNL_ARG_ATTR_DROP_MASK, dnn_mem_t(drop_md, test_engine));
-        //mem_map[DNNL_ARG_ATTR_DROP_MASK].set_dt(dnnl_u8);
+       //         DNNL_ARG_ATTR_DROPOUT_MASK, dnn_mem_t(drop_md, test_engine));
+        //mem_map[DNNL_ARG_ATTR_DROPOUT_MASK].set_dt(dnnl_u8);
 
     }
 

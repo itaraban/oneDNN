@@ -89,7 +89,7 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
     auto dst = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DST, status);
     CHECK(status);
     auto drop_mask = CTX_OUT_CLEAN_MEM(
-            unsigned char *, DNNL_ARG_ATTR_DROP_MASK, status);
+            unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK, status);
     CHECK(status);
 
     const memory_desc_wrapper src_d(pd()->src_md());
@@ -153,7 +153,7 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto dst = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DST, status);
     CHECK(status);
-    auto drop_mask = CTX_OUT_CLEAN_MEM(unsigned char *, DNNL_ARG_ATTR_DROP_MASK, status);
+    auto drop_mask = CTX_OUT_CLEAN_MEM(unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK, status);
     CHECK(status);
 
     const memory_desc_wrapper src_d(pd()->src_md());

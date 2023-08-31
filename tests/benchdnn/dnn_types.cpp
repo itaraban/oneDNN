@@ -922,7 +922,7 @@ int attr_args_t::prepare_post_ops_mds(
         auto drop_tensor_desc = dnn_mem_t::init_md(
                 ndims, dims,
                 dnnl_u8, attr.dropout.tag);
-        mds.emplace(DNNL_ARG_ATTR_DROP_MASK, std::move(drop_tensor_desc));
+        mds.emplace(DNNL_ARG_ATTR_DROPOUT_MASK, std::move(drop_tensor_desc));
     }
 
     return OK;
@@ -1041,7 +1041,7 @@ dnnl_primitive_attr_t create_dnnl_attr(
     DNN_SAFE_V(
             dnnl_primitive_attr_set_fpmath_mode(dnnl_attr, attr.fpmath_mode));
     if (attr.dropout.p > 0.) {
-        const auto &drop_mask_md = attr_args.get_md(DNNL_ARG_ATTR_DROP_MASK);
+        const auto &drop_mask_md = attr_args.get_md(DNNL_ARG_ATTR_DROPOUT_MASK);
         DNN_SAFE_V(dnnl_primitive_attr_set_dropout(
                 dnnl_attr, attr.dropout.p, drop_mask_md));
     }

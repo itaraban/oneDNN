@@ -2517,7 +2517,7 @@ typedef const struct dnnl_primitive *const_dnnl_primitive_t;
 
 /// Arguments for fused depthwise convolution.
 /// See @ref dev_guide_attributes_post_ops_depthwise_fusion
-#define DNNL_ARG_ATTR_DROP_MASK 16384
+#define DNNL_ARG_ATTR_DROPOUT_MASK 16384
 
 /// Starting point for a binary post operation.
 #define DNNL_ARG_ATTR_MULTIPLE_POST_OP_BASE 32768

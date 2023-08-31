@@ -391,7 +391,7 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
             case DNNL_ARG_DIFF_DST:
                 SAFE(fill_data(prb, DST, mem, ref_mem), WARN);
                 break;
-            case DNNL_ARG_ATTR_DROP_MASK:
+            case DNNL_ARG_ATTR_DROPOUT_MASK:
                 SAFE(fill_dropout_mask(mem, ref_mem), WARN);
                 break;
             case DNNL_ARG_SCRATCHPAD: break;
@@ -461,7 +461,7 @@ void dump_point_values(const_dnnl_memory_desc_t md,
 void check_dropout(const args_t &args, res_t *res) {
     const auto &mem_src = args.find(DNNL_ARG_SRC);
     const auto &mem_dst = args.find(DNNL_ARG_DST);
-    const auto &mem_drop = args.find(DNNL_ARG_ATTR_DROP_MASK);
+    const auto &mem_drop = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
     dnn_mem_t src_f32(mem_src, dnnl_f32, tag::abx, get_cpu_engine());
     dnn_mem_t dst_f32(mem_dst, dnnl_f32, tag::abx, get_cpu_engine());
     dnn_mem_t drop_u8(mem_drop, dnnl_u8, tag::abx, get_cpu_engine());

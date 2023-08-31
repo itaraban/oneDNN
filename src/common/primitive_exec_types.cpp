@@ -68,7 +68,7 @@ status_t cvt_primitive_args(const primitive_desc_t *pd, int nargs,
                 args[arg] = {mem, false};
                 n_outputs++;
                 extra_outputs += (arg == DNNL_ARG_SCRATCHPAD)
-                    || (arg == DNNL_ARG_ATTR_DROP_MASK);
+                    || (arg == DNNL_ARG_ATTR_DROPOUT_MASK);
                 break;
             case primitive_desc_t::arg_usage_t::unused:
                 VINFO(exec, check, primitive,

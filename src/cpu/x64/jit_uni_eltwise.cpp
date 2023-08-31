@@ -350,7 +350,7 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
     auto dst = CTX_OUT_MEM(data_t *, DNNL_ARG_DST);
     auto drop_mask
             = CTX_OUT_MEM(
-            unsigned char *, DNNL_ARG_ATTR_DROP_MASK);
+            unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK);
 
     const memory_desc_wrapper data_d(pd()->src_md());
     const auto nelems = data_d.nelems(true);
