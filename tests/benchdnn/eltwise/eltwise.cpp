@@ -394,6 +394,14 @@ int init_ref_memory_args(dnn_mem_map_t &ref_mem_map, dnn_mem_map_t &mem_map,
             case DNNL_ARG_ATTR_DROPOUT_MASK:
                 SAFE(fill_dropout_mask(mem, ref_mem), WARN);
                 break;
+            case DNNL_ARG_ATTR_DROPOUT_PROBABILITY:
+                ref_mem.set_elem(0, prb->attr.dropout.p);
+                mem.reorder(ref_mem);
+                break;
+            case DNNL_ARG_ATTR_DROPOUT_SEED:
+                ref_mem.set_elem(0, prb->attr.dropout.seed);
+                mem.reorder(ref_mem);
+                break;
             case DNNL_ARG_SCRATCHPAD: break;
             default: { // Process all attributes here
                 int post_ops_range = DNNL_ARG_ATTR_MULTIPLE_POST_OP(31)

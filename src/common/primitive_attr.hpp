@@ -357,13 +357,13 @@ private:
 };
 
 struct drop_out_t : public c_compatible {
-    drop_out_t() : p(0.), drop_desc() {}
+    drop_out_t() : enabled(false), drop_desc() {}
 
     bool operator==(const drop_out_t &rhs) const {
-        return p == rhs.p && drop_desc == rhs.drop_desc;
+        return enabled == rhs.enabled && drop_desc == rhs.drop_desc;
     }
     status_t set_default_formats(const memory_desc_t *dst_md);
-    float p;
+    bool enabled;
     dnnl::impl::memory_desc_t drop_desc;
     //dnnl::impl::memory_desc_t user_src1_desc;
 };
@@ -733,7 +733,7 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
     }
 
     dnnl::impl::status_t set_dropout(
-            float p, const dnnl::impl::memory_desc_t *drop_md);
+            bool enabled, const dnnl::impl::memory_desc_t *drop_md);
     dnnl::impl::status_t set_fpmath_mode(dnnl::impl::fpmath_mode_t fpmath_mode);
     dnnl::impl::status_t set_scratchpad_mode(
             dnnl::impl::scratchpad_mode_t scratchpad_mode);

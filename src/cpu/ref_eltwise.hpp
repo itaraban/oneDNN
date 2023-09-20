@@ -58,13 +58,13 @@ struct ref_eltwise_fwd_t : public primitive_t {
                     && attr_.set_default_formats(dst_md(0)) == status::success;
             if (!ok) return status::unimplemented;
 
-            with_drop_out = attr_.drop_out_.p > 0.;
+            with_drop_out = attr_.drop_out_.enabled;
 
             use_dense_ = src_d.is_dense(true) && dst_d.is_dense(true)
                     && IMPLICATION(!src_d.is_dense() || !dst_d.is_dense(),
                             is_zero_preserved())
                     && IMPLICATION(with_drop_out,
-                            src_d == mask_d);
+                            mask_d.similar_to(src_d, true, false));
             use_nCspBc_padded_ = !use_dense_
                     && src_d.blocking_desc().inner_nblks == 1
                     && one_of(src_d.blocking_desc().inner_blks[0], 8, 16)
@@ -74,7 +74,7 @@ struct ref_eltwise_fwd_t : public primitive_t {
             const auto &po = attr()->post_ops_;
             if (has_zero_dim_memory() || !po.has_default_values())
                 use_dense_ = use_nCspBc_padded_ = false;
-            
+
             return status::success;
         }
 
@@ -88,7 +88,7 @@ struct ref_eltwise_fwd_t : public primitive_t {
                 = utils::make_unique<ref_post_ops_t>(pd()->attr()->post_ops_);
         if (!ref_post_ops) return status::out_of_memory;
         //ref_dropout = utils::make_unique<ref_dropout_fwd_t>(
-         //       pd()->attr()->drop_out_p, pd()->get_prop_kind());
+        //       pd()->attr()->drop_out_p, pd()->get_prop_kind());
         return status::success;
     }
 

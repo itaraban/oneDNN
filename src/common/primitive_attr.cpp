@@ -141,7 +141,8 @@ bool primitive_attr_t::has_default_values(dnnl_primitive_attr::skip_mask_t mask,
     bool gpu_attr_ok = IMPLICATION((bool)(~mask & smask_t::gpu_attr),
             !gpu_attr_ || gpu_attr_->has_default_values());
     CHECK_ARG(gpu_attr_ok);
-    CHECK_ARG(IMPLICATION((bool)(~mask & smask_t::drop_out), drop_out_.p == 0.));
+    CHECK_ARG(
+            IMPLICATION((bool)(~mask & smask_t::drop_out), !drop_out_.enabled));
     CHECK_ARG(this->defined(defined_mask));
     return ok;
 #undef CHECK_MASK
@@ -365,8 +366,8 @@ bool post_ops_t::check_sum_consistency(const data_type_t dst_dt,
 }
 
 status_t primitive_attr_t::set_dropout(
-        float p, const dnnl::impl::memory_desc_t *drop_md) {
-    drop_out_.p = p;
+        bool enabled, const dnnl::impl::memory_desc_t *drop_md) {
+    drop_out_.enabled = enabled;
     drop_out_.drop_desc = *drop_md;
     return status::success;
 }
@@ -427,18 +428,18 @@ status_t dnnl_primitive_attr_destroy(primitive_attr_t *attr) {
     return success;
 }
 
-status_t dnnl_primitive_attr_get_dropout(const primitive_attr_t *attr, float *p,
-        const memory_desc_t **drop_mask_desc) {
-    if (any_null(attr, p)) return invalid_arguments;
-    *p = attr->drop_out_.p;
+status_t dnnl_primitive_attr_get_dropout(const primitive_attr_t *attr,
+        uint8_t *enabled, const memory_desc_t **drop_mask_desc) {
+    if (any_null(attr, enabled)) return invalid_arguments;
+    *enabled = attr->drop_out_.enabled;
     if (drop_mask_desc) *drop_mask_desc = &attr->drop_out_.drop_desc;
     return success;
 }
 
-status_t dnnl_primitive_attr_set_dropout(
-        primitive_attr_t *attr, double p, const memory_desc_t *drop_mask_desc) {
+status_t dnnl_primitive_attr_set_dropout(primitive_attr_t *attr,
+        uint8_t enable_drop, const memory_desc_t *drop_mask_desc) {
     if (any_null(attr)) return invalid_arguments;
-    return attr->set_dropout(p, drop_mask_desc);
+    return attr->set_dropout(enable_drop, drop_mask_desc);
 }
 
 status_t dnnl_primitive_attr_get_fpmath_mode(

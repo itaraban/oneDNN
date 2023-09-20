@@ -734,7 +734,13 @@ void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
         mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_MASK,
                 dnn_mem_t(ndims, dims, dnnl_u8, prb->attr.dropout.tag,
                         test_engine));
+        int64_t count = 1;
+        auto prob_md = dnn_mem_t::init_md(1, &count, dnnl_f32, tag::abx);
+        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_PROBABILITY, dnn_mem_t(prob_md, test_engine));
 
+        auto seed_md = dnn_mem_t::init_md(1, &count, dnnl_s32, tag::abx);
+        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_SEED,
+                dnn_mem_t(seed_md, test_engine));
 
        // const auto &drop_md = query_md(const_pd, DNNL_ARG_ATTR_DROPOUT_MASK);
         //dnn_mem_t drop_m =;

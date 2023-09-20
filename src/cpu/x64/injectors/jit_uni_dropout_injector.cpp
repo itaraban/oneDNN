@@ -26,14 +26,6 @@ namespace impl {
 namespace cpu {
 namespace x64 {
 
-namespace dropout_injector {
-
-bool is_supported(cpu_isa_t isa) {
-    return is_superset(isa, sse41);
-}
-
-} // namespace dropout_injector
-
 using namespace Xbyak;
 
 template <cpu_isa_t isa, typename Wmm>
@@ -287,7 +279,6 @@ float internal_rng_scalar_float_next(
 } // namespace
 template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
-    //uint32_t seed = 1;
     if (!gen_table) return;
     const uint32_t internal_rng_state0[16] = {0x68b46ad5, 0x51a0a11b,
             0x9b531a7c, 0xa247d1b2, 0x303b55b8, 0x92f9e76, 0xc3dc2511,
@@ -385,11 +376,11 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
         h->dd(internal_rng_state3[d]);
 
     for (size_t d = 0; d < vlen; d += sizeof(uint32_t))
-        h->dd(float2int(scale_));
+        h->dd(float2int(1.));
     for (size_t d = 0; d < len; d++)
         h->dd(0x3f800000);
     for (size_t d = 0; d < len; d++)
-        h->dd(float2int(p_ + 1.));
+        h->dd(float2int(1.));
     if (is_avx512) {
         for (size_t d = 0; d < len; d++)
             h->dd(0x01010101);
@@ -406,11 +397,22 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
 
 template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::load_rng_state(size_t state0_idx,
-        size_t state1_idx, size_t state2_idx, size_t state3_idx, Reg32& seed) {
+        size_t state1_idx, size_t state2_idx, size_t state3_idx, Reg32& seed, Reg32& p, Reg32& scale) {
     vmm_state0 = Vmm(state0_idx);
     vmm_state1 = Vmm(state1_idx);
     vmm_state2 = Vmm(state2_idx);
     vmm_state3 = Vmm(state3_idx);
+
+
+    h->uni_vpbroadcastd(vmm_state0, scale);
+    h->uni_vpbroadcastd(vmm_state1, p);
+    //h->uni_vmovups(vmm_state1, vmm_state0);
+    //h->uni_vmovups(vmm_state2, h->ptr[p_table + vlen * 8]);
+    //h->uni_vsubps(vmm_state0, vmm_state2, vmm_state0);
+    //h->uni_vdivps(vmm_state0, vmm_state2, vmm_state0);
+    h->uni_vmovups(h->ptr[p_table + vlen * 8], vmm_state0);
+    //h->uni_vaddps(vmm_state1, vmm_state1, vmm_state2);
+    h->uni_vmovups(h->ptr[p_table + vlen * 10], vmm_state1);
 
     h->uni_vpbroadcastd(vmm_state3, seed);
 

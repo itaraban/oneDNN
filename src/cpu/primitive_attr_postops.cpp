@@ -307,19 +307,20 @@ status_t ref_post_ops_t::execute(float &res, const args_t &args) const {
     return status::success;
 }
 
-
 ref_dropout_fwd_t::ref_dropout_fwd_t(double p, prop_kind_t dir, int seed)
-    : p(p), rd(), gen(rd()), d(1 - p), training(dir == prop_kind_t::dnnl_forward_training) {
-    srand(time(NULL) + seed);
-   
+    : p(p)
+    , rd()
+    , gen(seed)
+    , d(1 - p)
+    , training(dir == prop_kind_t::dnnl_forward_training) {
+    //srand(time(NULL) + seed);
 }
 
-float ref_dropout_fwd_t::compute_scalar(float s, uint8_t* mask, dim_t offset) {
+float ref_dropout_fwd_t::compute_scalar(float s, uint8_t *mask, dim_t offset) {
     if (training) {
         double q = 1 - p;
         uint8_t m = d(gen);
-        if (mask)
-            mask[offset] = m;
+        if (mask) mask[offset] = m;
         return (m) ? s / q : 0;
     } else
         return s;
@@ -341,7 +342,6 @@ float ref_dropout_fwd_t::apply_scalar(float s, uint8_t *mask, dim_t offset) {
     } else
         return s;
 }
-
 
 } // namespace cpu
 } // namespace impl

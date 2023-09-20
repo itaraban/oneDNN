@@ -368,6 +368,7 @@ struct attr_t {
 
     struct drop_out_t {
         float p = 0.f;
+        uint32_t seed = 0;
         std::string tag = tag::abx;
 
          int from_str(const std::string &s);

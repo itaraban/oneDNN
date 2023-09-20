@@ -33,36 +33,6 @@ namespace impl {
 namespace cpu {
 namespace x64 {
 
-namespace dropout_injector {
-struct static_params_t {
-
-    static_params_t(bool save_state = true,
-            Xbyak::Reg64 p_table = Xbyak::util::rax,
-            Xbyak::Opmask k_mask = Xbyak::Opmask(1), 
-            bool use_dst = false, bool preserve_vmm = true,
-            bool preserve_p_table = true)
-        : save_state(save_state)
-        , p_table(p_table)
-        , k_mask(k_mask)
-        , use_dst(use_dst)
-        , preserve_vmm(preserve_vmm)
-        , preserve_p_table(preserve_p_table) {}
-
-    bool save_state;
-    Xbyak::Reg64 p_table;
-    Xbyak::Opmask k_mask;
-    bool use_dst;
-    bool preserve_vmm;
-    bool preserve_p_table;
-};
-
-/*
- * Checks if dropout injection for given args is supported.
- */
-bool is_supported(cpu_isa_t isa);
-
-} // namespace dropout_injector
-
 template <cpu_isa_t isa, typename Wmm = typename cpu_isa_traits<isa>::Vmm>
 struct jit_uni_dropout_injector_f32 {
     using Vmm = Wmm;
@@ -76,20 +46,18 @@ struct jit_uni_dropout_injector_f32 {
     //   constants used in alg codes.
     // use_dst - defines whether source or destination point is passed to alg
     //   code. Depends on algorithm. See `_use_dst_for_bwd` algs definition.
-    jit_uni_dropout_injector_f32(jit_generator *host,  float p, bool save_state = true,
+    jit_uni_dropout_injector_f32(jit_generator *host,  bool save_state = true,
         Xbyak::Reg64 p_table = Xbyak::util::rax,
             Xbyak::Opmask k_mask = Xbyak::Opmask(1),
             bool preserve_vmm = true,
             bool preserve_p_table = true)
-        : scale_(1 / (1 - p))
-        , p_(p)
-        , h(host)
+        : h(host)
         , save_state_(save_state)
         , p_table(p_table)
         , k_mask(k_mask)
         , preserve_vmm_(preserve_vmm)
         , preserve_p_table_(preserve_p_table) {
-        assert(dropout_injector::is_supported(isa));
+        assert(is_superset(isa, sse41));
     }
 
 
@@ -104,10 +72,10 @@ struct jit_uni_dropout_injector_f32 {
     void prepare_table(bool gen_table = true);
     void load_table_addr() { h->mov(p_table, l_table); }
     void load_rng_state(size_t state0_idx, size_t state1_idx, size_t state2_idx,
-            size_t state3_idx, Xbyak::Reg32 &seed);
+            size_t state3_idx, Xbyak::Reg32 &seed, Xbyak::Reg32 &p,
+            Xbyak::Reg32 &scale);
 
 private:
-    const float scale_, p_;
 
     jit_generator *const h;
 

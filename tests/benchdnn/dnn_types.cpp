@@ -574,6 +574,9 @@ int attr_t::drop_out_t::from_str(const std::string &s) {
     p = std::stof(parser::get_substr(s, start_pos, ':'));
     if (start_pos == std::string::npos) return OK;
     if (start_pos >= s.size()) return FAIL; // to catch dangling ':'
+    seed = std::stoi(parser::get_substr(s, start_pos, ':'));
+    if (start_pos == std::string::npos) return OK;
+    if (start_pos >= s.size()) return FAIL; // to catch dangling ':'
     tag = parser::get_substr(s, start_pos, ':');
     SAFE(check_tag(tag), WARN);
     return OK;
@@ -691,7 +694,7 @@ std::ostream &operator<<(std::ostream &s, dnnl_fpmath_mode_t fm) {
 }
 
 std::ostream &operator<<(std::ostream &s, const attr_t::drop_out_t &drop) {
-    s << drop.p;
+    s << drop.p << drop.seed;
     if (drop.tag != tag::any) s << ":" << drop.tag;
     return s;
 }
@@ -1043,7 +1046,7 @@ dnnl_primitive_attr_t create_dnnl_attr(
     if (attr.dropout.p > 0.) {
         const auto &drop_mask_md = attr_args.get_md(DNNL_ARG_ATTR_DROPOUT_MASK);
         DNN_SAFE_V(dnnl_primitive_attr_set_dropout(
-                dnnl_attr, attr.dropout.p, drop_mask_md));
+                dnnl_attr, attr.dropout.p > 0., drop_mask_md));
     }
     return dnnl_attr;
 }

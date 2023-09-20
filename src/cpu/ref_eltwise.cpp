@@ -104,23 +104,22 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
     const float alpha = pd()->desc()->alpha;
     const float beta = pd()->desc()->beta;
     const int ndims = pd()->ndims();
-    ref_dropout_fwd_t ref_dropout(
-            pd()->attr()->drop_out_.p, pd()->get_prop_kind());
+    bool with_drop_out = pd()->attr()->drop_out_.enabled;
+    const auto p = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY);
+    ref_dropout_fwd_t ref_dropout(*p, pd()->get_prop_kind());
 
-    if (pd()->attr()->drop_out_.p > 0.0) {
+    if (with_drop_out) {
         const dim_t nelems = src_d.nelems();
         const dim_t parts = dnnl_get_current_num_threads();
         const dim_t min_part_size = nstl::min(nelems, (dim_t)5);
         const dim_t part_size
                 = nstl::max(utils::div_up(nelems, parts), min_part_size);
         const dim_t result_parts = utils::div_up(nelems, part_size);
-        const float p = pd()->attr()->drop_out_.p;
         const prop_kind_t pk = pd()->get_prop_kind();
         parallel_nd(result_parts, [&](dim_t e) {
-            ref_dropout_fwd_t ref_dropout2(p, pk, omp_get_thread_num());
+            ref_dropout_fwd_t ref_dropout2(*p, pk, omp_get_thread_num());
             for (int i = e * part_size;
-                    i < nstl::min(nelems, (e + 1) * part_size);
-                    ++i)
+                    i < nstl::min(nelems, (e + 1) * part_size); ++i)
                 ref_dropout2.compute_rand(drop_mask, mask_d.off_l(i));
         });
     }
@@ -137,9 +136,9 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
                 args.l_offset = data_l_off;
                 args.dst_md = pd()->dst_md();
                 ref_post_ops->execute(res, args);
-                if (pd()->attr()->drop_out_.p > 0.0)
+                if (with_drop_out)
                     res = ref_dropout.apply_scalar(
-                        res, drop_mask, DATA_OFF(mask_d, n, c, d, h, w));
+                            res, drop_mask, DATA_OFF(mask_d, n, c, d, h, w));
 
                 dst[data_p_off] = cpu::saturate_and_round<data_t>(res);
             });
@@ -153,7 +152,8 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
     auto src = CTX_IN_MEM(const data_t *, DNNL_ARG_SRC);
     auto dst = CTX_OUT_CLEAN_MEM(data_t *, DNNL_ARG_DST, status);
     CHECK(status);
-    auto drop_mask = CTX_OUT_CLEAN_MEM(unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK, status);
+    auto drop_mask = CTX_OUT_CLEAN_MEM(
+            unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK, status);
     CHECK(status);
 
     const memory_desc_wrapper src_d(pd()->src_md());
@@ -165,43 +165,45 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
 
     src += src_d.offset0();
     dst += src_d.offset0();
-    drop_mask = (drop_mask) ? drop_mask + src_d.offset0() : drop_mask;
-    ref_dropout_fwd_t ref_dropout(
-            pd()->attr()->drop_out_.p, pd()->get_prop_kind());
 
-    
+    bool with_drop_out = pd()->attr()->drop_out_.enabled;
+    drop_mask = (drop_mask) ? drop_mask + src_d.offset0() : drop_mask;
+    const auto p = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY);
+    const auto seed = CTX_IN_MEM(const uint32_t *, DNNL_ARG_ATTR_DROPOUT_SEED);
+    ref_dropout_fwd_t ref_dropout(*p, pd()->get_prop_kind(), *seed);
+
     // a fast path for relu as the most popular activation
-    if (alg_kind == alg_kind::eltwise_relu && alpha == 0) {
+    if (alg_kind == alg_kind::eltwise_relu && alpha == 0 && !with_drop_out) {
         parallel_nd(nelems, [&](dim_t e) {
             float res = math::relu_fwd(src[e], alpha);
 
-           // res = ref_dropout.compute_scalar(res, drop_mask, e);
+            // res = ref_dropout.compute_scalar(res, drop_mask, e);
             dst[e] = cpu::saturate_and_round<data_t>(res);
         });
         return status::success;
     }
-    if (pd()->attr()->drop_out_.p > 0.0) {
+    if (with_drop_out) {
         const dim_t parts = dnnl_get_current_num_threads();
         const dim_t min_part_size = nstl::min(nelems, (dim_t)5);
         const dim_t part_size
                 = nstl::max(utils::div_up(nelems, parts), min_part_size);
         const dim_t result_parts = utils::div_up(nelems, part_size);
 
-        const float p = pd()->attr()->drop_out_.p;
+        //const auto p = CTX_IN_MEM(
+        //        const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY); //pd()->attr()->drop_out_.p;
         const prop_kind_t pk = pd()->get_prop_kind();
         parallel_nd(result_parts, [&](dim_t e) {
-            ref_dropout_fwd_t ref_dropout2(p, pk, omp_get_thread_num());
+            ref_dropout_fwd_t ref_dropout2(
+                    *p, pk, omp_get_thread_num() + *seed);
             for (int i = e * part_size;
-                    i < nstl::min(nelems, (e + 1) * part_size);
-                    ++i)
+                    i < nstl::min(nelems, (e + 1) * part_size); ++i)
                 ref_dropout2.compute_rand(drop_mask, i);
         });
     }
     parallel_nd(nelems, [&](dim_t e) {
         float res = compute_eltwise_scalar_fwd(alg_kind, src[e], alpha, beta);
 
-        if (pd()->attr()->drop_out_.p > 0.0) 
-            res = ref_dropout.apply_scalar(res, drop_mask, e);
+        if (with_drop_out) res = ref_dropout.apply_scalar(res, drop_mask, e);
         dst[e] = cpu::saturate_and_round<data_t>(res);
     });
     return status::success;

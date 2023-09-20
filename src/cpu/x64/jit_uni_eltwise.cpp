@@ -43,6 +43,8 @@ struct jit_args_t {
     const void *drop_mask; // fwd: drop_out mask
     const void *diff_dst; // fwd: nullptr;  bwd: diff_dst;
     size_t seed;
+    float p;
+    float scale;
     size_t work_amount;
 };
 
@@ -83,7 +85,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         , vlen_(is_bf16() || is_f16() ? cpu_isa_traits<isa>::vlen / 2
                                       : cpu_isa_traits<isa>::vlen)
         , simd_w_(vlen_ / dtype_size())
-        , is_fwd_(pd_->is_fwd()), with_dropout_(pd_->attr()->drop_out_.p > 0.0) {
+        , is_fwd_(pd_->is_fwd()), with_dropout_(pd_->attr()->drop_out_.enabled) {
 
         const auto &desc = *pd_->desc();
         // we can consider that there's no auxiliary vregs on fwd path
@@ -95,7 +97,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
                 reg_injector_table, injector_mask, is_fwd_, pd_->use_dst()));
 
                 dropout_injector_.reset(new jit_uni_dropout_injector_f32<isa>(this,
-                pd_->attr()->drop_out_.p, save_state, reg_drop_injector_table,
+                save_state, reg_drop_injector_table,
                 drop_injector_mask));
 
         io::io_conf_t io_conf;
@@ -225,11 +227,14 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         eltwise_injector_->load_table_addr();
         if (with_dropout_) {
             mov(reg_drop_mask, ptr[param + GET_OFF(drop_mask)]);
-            mov(reg_seed, ptr[param + GET_OFF(seed)]);
+            mov(reg_dropout_seed, ptr[param + GET_OFF(seed)]);
+            mov(reg_dropout_p, ptr[param + GET_OFF(p)]);
+            mov(reg_dropout_scale, ptr[param + GET_OFF(scale)]);
             dropout_injector_->load_table_addr();
             dropout_injector_->load_rng_state(vmm_drop_rng_state0.getIdx(),
                     vmm_drop_rng_state1.getIdx(), vmm_drop_rng_state2.getIdx(),
-                    vmm_drop_rng_state3.getIdx(), reg_seed);
+                    vmm_drop_rng_state3.getIdx(), reg_dropout_seed,
+                    reg_dropout_p, reg_dropout_scale);
         }
 
         // TODO: consider improving.
@@ -265,11 +270,13 @@ private:
     Reg64 reg_injector_table = r9;
     Reg64 reg_drop_injector_table = r11;
     Reg64 reg_drop_mask = r12;
-    Reg32 reg_seed = r13d;
+    Reg32 reg_dropout_seed = r13d;
+    Reg32 reg_dropout_p = r14d;
+    Reg32 reg_dropout_scale = r10d;
     Reg64 reg_diff_dst = r10;
     Reg64 reg_work_amount = rsi;
     Reg64 imm_addr64 = rbx;
-    Reg64 reg_tmp = r14;
+    Reg64 reg_tmp = r15;
 
     Opmask injector_mask = Opmask(1);
     Opmask drop_injector_mask = Opmask(2);
@@ -325,8 +332,8 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
             && attr()->has_default_values(sm::drop_out)
             && set_default_formats_common()
             && src_d == memory_desc_wrapper(dst_md())
-            && IMPLICATION(attr_.drop_out_.p > 0.,
-                    src_d == mask_d);
+            && IMPLICATION(attr_.drop_out_.enabled,
+                    mask_d.similar_to(src_d, true, false));
     return ok ? status::success : status::unimplemented;
 }
 
@@ -352,6 +359,9 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
             = CTX_OUT_MEM(
             unsigned char *, DNNL_ARG_ATTR_DROPOUT_MASK);
 
+    auto seed_p = CTX_IN_MEM(const uint32_t *, DNNL_ARG_ATTR_DROPOUT_SEED);
+    auto p_p = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY);
+
     const memory_desc_wrapper data_d(pd()->src_md());
     const auto nelems = data_d.nelems(true);
     const int simd_w = 64 / data_d.data_type_size();
@@ -373,7 +383,9 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         args.drop_mask = (drop_mask) ? drop_mask + start : nullptr;
         args.diff_dst = nullptr;
         args.work_amount = end - start;
-        args.seed = start;
+        args.seed = *seed_p + start;
+        args.p = *p_p + 1;
+        args.scale = (1 / (1 - *p_p));
         (*kernel_)(&args);
     });
 

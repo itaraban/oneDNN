@@ -17,8 +17,8 @@
 #ifndef CPU_PRIMITIVE_ATTR_POSTOPS_HPP
 #define CPU_PRIMITIVE_ATTR_POSTOPS_HPP
 
-#include <vector>
 #include <random>
+#include <vector>
 
 #include "common/primitive.hpp"
 #include "common/primitive_attr.hpp"
@@ -88,15 +88,14 @@ private:
 };
 
 struct ref_dropout_fwd_t {
-    ref_dropout_fwd_t(double p, prop_kind_t dir, int seed = 1);
+    ref_dropout_fwd_t(double p, prop_kind_t dir, int seed = 0);
 
     float compute_scalar(float s, uint8_t *mask, dim_t offset);
     void compute_rand(uint8_t *mask, dim_t offset);
-    float apply_scalar(float s, uint8_t *mask, dim_t offset); 
+    float apply_scalar(float s, uint8_t *mask, dim_t offset);
     const double p;
 
 private:
-
     std::random_device rd;
     std::mt19937 gen;
     std::bernoulli_distribution d;

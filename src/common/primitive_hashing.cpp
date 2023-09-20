@@ -279,9 +279,8 @@ size_t get_attr_hash(const primitive_attr_t &attr) {
     if (attr.gpu_attr_) {
         seed = hash_combine(seed, attr.gpu_attr_->get_hash());
     }
-    seed = hash_combine(seed, attr.drop_out_.p);
-    seed = hash_combine(
-            seed, get_md_hash(attr.drop_out_.drop_desc));
+    seed = hash_combine(seed, attr.drop_out_.enabled);
+    seed = hash_combine(seed, get_md_hash(attr.drop_out_.drop_desc));
     // Combined hash for attributes
     return seed;
 }
