@@ -135,11 +135,10 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
                 args.ctx = &ctx;
                 args.l_offset = data_l_off;
                 args.dst_md = pd()->dst_md();
-                ref_post_ops->execute(res, args);
                 if (with_drop_out)
                     res = ref_dropout.apply_scalar(
                             res, drop_mask, DATA_OFF(mask_d, n, c, d, h, w));
-
+                ref_post_ops->execute(res, args);
                 dst[data_p_off] = cpu::saturate_and_round<data_t>(res);
             });
     return status::success;
