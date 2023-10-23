@@ -383,9 +383,9 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         args.drop_mask = (drop_mask) ? drop_mask + start : nullptr;
         args.diff_dst = nullptr;
         args.work_amount = end - start;
-        args.seed = *seed_p + start;
-        args.p = *p_p + 1;
-        args.scale = (1 / (1 - *p_p));
+        args.seed = (seed_p) ? *seed_p + start : 0;
+        args.p = (p_p) ? *p_p + 1 : 0;
+        args.scale = (p_p) ? (1 / (1 - *p_p)) : 0;
         (*kernel_)(&args);
     });
 

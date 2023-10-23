@@ -3707,25 +3707,23 @@ struct primitive_attr : public handle<dnnl_primitive_attr_t> {
     ///
     /// @param p Drop out probability.
     /// @param src1_desc Output memory descriptor of a drop out mask.
-    void get_dropout(bool &enabled, memory::desc &mask_desc) const {
+    void get_dropout(memory::desc &mask_desc) const {
         const_dnnl_memory_desc_t cdesc;
-        uint8_t enabled_u8;
         error::wrap_c_api(
-                dnnl_primitive_attr_get_dropout(get(), &enabled_u8, &cdesc),
+                dnnl_primitive_attr_get_dropout(get(), &cdesc),
                 "could not get parameters of a dropout attribute");
         dnnl_memory_desc_t cloned_md = nullptr;
         error::wrap_c_api(dnnl_memory_desc_clone(&cloned_md, cdesc),
                 "could not clone a memory descriptor");
         mask_desc = memory::desc(cloned_md);
-        enabled = enabled_u8;
     }
 
     /// Sets drop-out probability.
     ///
     /// @param mode Specified dropout probability mode.
-    void set_dropout(bool enabled, const memory::desc &mask_desc) {
-        error::wrap_c_api(dnnl_primitive_attr_set_dropout(get(), enabled, mask_desc.get()),
-                "could not set dropout probability primitive attribute");
+    void set_dropout(const memory::desc &mask_desc) {
+        error::wrap_c_api(dnnl_primitive_attr_set_dropout(get(), mask_desc.get()),
+                "could not set dropout primitive attribute");
     }
 
     /// Returns the fpmath mode

@@ -1046,7 +1046,7 @@ dnnl_primitive_attr_t create_dnnl_attr(
     if (attr.dropout.p > 0.) {
         const auto &drop_mask_md = attr_args.get_md(DNNL_ARG_ATTR_DROPOUT_MASK);
         DNN_SAFE_V(dnnl_primitive_attr_set_dropout(
-                dnnl_attr, attr.dropout.p > 0., drop_mask_md));
+                dnnl_attr, drop_mask_md));
     }
     return dnnl_attr;
 }

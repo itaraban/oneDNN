@@ -732,8 +732,7 @@ struct dnnl_primitive_attr : public dnnl::impl::c_compatible {
         return ret;
     }
 
-    dnnl::impl::status_t set_dropout(
-            bool enabled, const dnnl::impl::memory_desc_t *drop_md);
+    dnnl::impl::status_t set_dropout(const dnnl::impl::memory_desc_t *drop_md);
     dnnl::impl::status_t set_fpmath_mode(dnnl::impl::fpmath_mode_t fpmath_mode);
     dnnl::impl::status_t set_scratchpad_mode(
             dnnl::impl::scratchpad_mode_t scratchpad_mode);

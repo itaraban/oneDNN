@@ -366,8 +366,9 @@ bool post_ops_t::check_sum_consistency(const data_type_t dst_dt,
 }
 
 status_t primitive_attr_t::set_dropout(
-        bool enabled, const dnnl::impl::memory_desc_t *drop_md) {
-    drop_out_.enabled = enabled;
+        const dnnl::impl::memory_desc_t *drop_md) {
+
+    drop_out_.enabled = *drop_md != memory_desc_t();
     drop_out_.drop_desc = *drop_md;
     return status::success;
 }
@@ -437,9 +438,9 @@ status_t dnnl_primitive_attr_get_dropout(const primitive_attr_t *attr,
 }
 
 status_t dnnl_primitive_attr_set_dropout(primitive_attr_t *attr,
-        uint8_t enable_drop, const memory_desc_t *drop_mask_desc) {
+        const memory_desc_t *drop_mask_desc) {
     if (any_null(attr)) return invalid_arguments;
-    return attr->set_dropout(enable_drop, drop_mask_desc);
+    return attr->set_dropout(drop_mask_desc);
 }
 
 status_t dnnl_primitive_attr_get_fpmath_mode(
