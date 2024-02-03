@@ -247,6 +247,67 @@ dim_t get_binary_src1_off(const memory_desc_t &src1_md, const dim_t l_offset,
 
 } // namespace
 
+
+namespace {
+
+void mulhilo32(uint32_t a, uint32_t b, uint32_t &hi, uint32_t &lo) {
+    const uint64_t product = static_cast<uint64_t>(a) * b;
+    lo = static_cast<uint32_t>(product);
+    hi = static_cast<uint32_t>(product >> 32);
+}
+
+void _philox4x32round(uint32_t *ctr, uint32_t *key) {
+    const static uint32_t PHILOX_M4x32_0 = 0xD2511F53;
+    const static uint32_t PHILOX_M4x32_1 = 0xCD9E8D57;
+    uint32_t hi0, lo0;
+    uint32_t hi1, lo1;
+    mulhilo32(PHILOX_M4x32_0, ctr[0], hi0, lo0);
+    mulhilo32(PHILOX_M4x32_1, ctr[2], hi1, lo1);
+    ctr[0] = hi1 ^ ctr[1] ^ key[0];
+    ctr[1] = lo1;
+    ctr[2] = hi0 ^ ctr[3] ^ key[1];
+    ctr[3] = lo0;
+}
+
+void _philox4x32bumpkey(uint32_t *key) {
+    const static uint32_t PHILOX_W4x32_0 = 0x9E3779B9;
+    const static uint32_t PHILOX_W4x32_1 = 0xBB67AE85;
+    key[0] += PHILOX_W4x32_0;
+    key[1] += PHILOX_W4x32_1;
+}
+
+uint8_t phillox_bernoulli(double p, int seed, dim_t d) {
+    uint32_t x = (d >> 2) << 2;
+    uint32_t ctr[4] = {0};
+    uint32_t key[4] = {0};
+    ctr[0] = x;
+    ctr[1] = x + 1;
+    ctr[2] = x + 2;
+    ctr[3] = x + 3;
+    key[0] = seed;
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    _philox4x32bumpkey(key);
+    _philox4x32round(ctr, key);
+    return (ctr[d % 4] > std::numeric_limits<uint32_t>::max() * p);
+}
+}
+
 status_t ref_post_ops_t::execute(float &res, const args_t &args) const {
     if (po_.len() == 0) return status::success;
 
@@ -312,11 +373,14 @@ ref_dropout_fwd_t::ref_dropout_fwd_t(double p, prop_kind_t dir, int seed)
     , rd()
     , gen(seed)
     , d(1 - p)
+    , seed(seed)
     , training(dir == prop_kind_t::dnnl_forward_training) {
     //srand(time(NULL) + seed);
 }
 
 float ref_dropout_fwd_t::compute_scalar(float s, uint8_t *mask, dim_t offset) {
+#ifdef PHILLOX
+#else
     if (training) {
         double q = 1 - p;
         uint8_t m = d(gen);
@@ -324,25 +388,41 @@ float ref_dropout_fwd_t::compute_scalar(float s, uint8_t *mask, dim_t offset) {
         return (m) ? s / q : 0;
     } else
         return s;
+#endif
+    return s;
 }
 
 void ref_dropout_fwd_t::compute_rand(uint8_t *mask, dim_t offset) {
+#ifdef PHILLOX
+#else
     if (training) {
         double q = 1 - p;
         mask[offset] = d(gen);
     }
+#endif
 }
 
 float ref_dropout_fwd_t::apply_scalar(float s, uint8_t *mask, dim_t offset) {
-
     if (training) {
+#ifdef PHILLOX
+        double q = 1 - p;
+        uint8_t m = phillox_bernoulli(p, seed, offset);
+        //printf("%d - %d\n", offset, m);
+        mask[offset] = m;
+#else
         double q = 1 - p;
         uint8_t m = mask[offset];
+#endif
         return (m) ? s / q : 0;
     } else
         return s;
 }
-
+float ref_dropout(float src, uint8_t* mask, dim_t offset, double p, int seed) {
+    double q = 1 - p;
+    uint8_t m = phillox_bernoulli(p, seed, offset);
+    mask[offset] = m;
+    return (m) ? src / q : 0;
+}
 } // namespace cpu
 } // namespace impl
 } // namespace dnnl

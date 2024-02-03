@@ -130,12 +130,88 @@ template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
         const injector_utils::vmm_index_set_iterator_t &start_idx_it,
         const injector_utils::vmm_index_set_iterator_t &end_idx_it,
-        const Xbyak::Address &mask_raw_addr,
+        const Xbyak::Address &mask_raw_addr, const Xbyak::Reg64 &reg_offset,
         bool tail) {
 
     const  bool is_avx512 = is_superset(isa, avx512_core);
+    const bool is_avx2 = is_superset(isa, avx2);
     constexpr bool is_ymm = std::is_same<Wmm, Xbyak::Ymm>::value;
     std::for_each(start_idx_it, end_idx_it, [&](size_t idx) {
+#define PHILLOX
+#ifdef PHILLOX
+
+        h->uni_vpbroadcastd(vmm_mask, Reg32(reg_offset.getIdx())); // counter
+
+        h->uni_vpaddd(vmm_mask, vmm_mask, h->ptr[p_table]);
+
+        if (is_avx512) {
+            //0x
+            h->kmovq(k_mask, h->ptr[p_table + vlen * 6]);
+        }
+        h->uni_vmovups(vmm_aux1, h->ptr[p_table + vlen]); // seed
+
+        for (int i = 0; i < 10; ++i) {
+            h->vpmuludq(vmm_aux0, vmm_mask, h->ptr[p_table + vlen * 2]);
+            h->uni_vpshufd(vmm_aux0, vmm_aux0, 0x4E);
+            if (is_avx512) {
+                h->vpternlogd(vmm_mask | k_mask, vmm_aux0, vmm_aux1,
+                        0x96);
+            } else {
+                h->uni_vxorps(vmm_mask, vmm_mask, vmm_aux1);
+                h->uni_vxorps(vmm_mask, vmm_mask, vmm_aux0);
+                
+                h->uni_vblendps(vmm_mask, vmm_mask, vmm_aux0, 0x55);
+            }
+            h->uni_vpshufd(vmm_mask, vmm_mask, 0xB1);
+            if (i < 9) {
+                h->uni_vpaddd(vmm_aux1, vmm_aux1, h->ptr[p_table + vlen * 3]);
+            }
+        }
+        h->uni_vpsrld(vmm_mask, vmm_mask, 1);
+        h->uni_vcvtdq2ps(vmm_mask, vmm_mask);
+        if (is_avx512) {
+            h->vcmpps(k_mask, vmm_mask, h->ptr[p_table + vlen * 4],
+                    jit_generator::_cmp_nlt_us);
+            //h->vpcmpgtd(k_mask, vmm_mask,
+            //        h->ptr[p_table + vlen * 4]); // generate mask
+                h->uni_vmulps(Vmm(idx) | k_mask | h->T_z, Vmm(idx),
+                        h->ptr[p_table + vlen * 5]); // v * scale with mask
+                h->uni_vmovups(vmm_aux0, h->ptr[p_table + vlen * 7]);
+                h->vmovdqu8(vmm_mask,
+                        vmm_aux0 | k_mask | h->T_z); // write mask to drop_mask
+
+                auto xmm_mask = Xbyak::Xmm(vmm_mask.getIdx());
+                h->store_bytes(xmm_mask, mask_raw_addr,
+                        (tail) ? 1 : vlen / sizeof(uint32_t));
+        } else {
+
+            h->uni_vcmpps(vmm_mask, vmm_mask, h->ptr[p_table + vlen * 4],
+                    jit_generator::_cmp_lt_os);
+            h->uni_vmulps(Vmm(idx), Vmm(idx), h->ptr[p_table + vlen * 5]);
+            h->uni_vxorps(vmm_aux0, vmm_aux0, vmm_aux0);
+
+            h->uni_vmovups(vmm_aux1, h->ptr[p_table + vlen * 6]);
+
+            h->uni_vblendvps(Vmm(idx), Vmm(idx), vmm_aux0, vmm_mask);
+            h->uni_vblendvps(vmm_mask, vmm_aux1, vmm_aux0, vmm_mask);
+            h->uni_vpshufb(vmm_mask, vmm_mask, h->ptr[p_table + vlen * 7]);
+
+            auto xmm_mask = Xbyak::Xmm(vmm_mask.getIdx());
+
+            if (tail) {
+                h->uni_vpextrb(mask_raw_addr, xmm_mask, 0);
+            } else {
+                h->uni_vpextrd(mask_raw_addr, xmm_mask, 0);
+                if (is_ymm) {
+                    auto ymm_mask = Xbyak::Ymm(vmm_mask.getIdx());
+                    h->vextractf128(xmm_mask, ymm_mask, 1);
+                    h->uni_vpextrd(h->ptr[mask_raw_addr.getRegExp()
+                                           + 4 * sizeof(uint8_t)],
+                            xmm_mask, 0);
+                }
+            }
+        }
+#else
         h->uni_vpaddd(vmm_aux0, vmm_state0, vmm_state3);
         h->uni_vpsrld(vmm_aux0, vmm_aux0, 9);
 
@@ -189,14 +265,14 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
         h->uni_vpslld(vmm_aux0, vmm_state3, 11);
         h->uni_vpsrld(vmm_state3, vmm_state3, 32 - 11);
         h->uni_vorps(vmm_state3, vmm_state3, vmm_aux0);
-
+#endif
     });
 }
 
 template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::compute_vector_range(
         const injector_utils::vmm_index_set_t &vmm_idxs,
-        const Xbyak::Address &mask_raw_addr,
+        const Xbyak::Address &mask_raw_addr, const Xbyak::Reg64 &reg_offset,
         bool tail) {
 
     if (vmm_idxs.empty()) return;
@@ -206,9 +282,9 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_vector_range(
             && *vmm_idxs.rbegin() <= vecs_count);
 
     injector_preamble(vmm_idxs);
-    compute_body(start_idx_tail, end_idx_it, mask_raw_addr,  tail);
+    compute_body(start_idx_tail, end_idx_it, mask_raw_addr, reg_offset, tail);
     injector_preamble_tail(start_idx_it);
-    compute_body(start_idx_it, start_idx_tail, mask_raw_addr,  tail);
+    compute_body(start_idx_it, start_idx_tail, mask_raw_addr, reg_offset, tail);
     injector_postamble();
 }
 
@@ -280,6 +356,32 @@ float internal_rng_scalar_float_next(
 template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
     if (!gen_table) return;
+#ifdef PHILLOX
+    const bool is_avx512 = is_superset(isa, avx512_core);
+    const uint64_t len = vlen / sizeof(uint32_t);
+    h->align(64);
+    h->L(l_table);
+    for (size_t d = 0; d < len; d++)
+        h->dd(d);
+    for (size_t d = 0; d < len; d++)
+        h->dd(0); // seed
+    for (size_t d = 0; d < len; d += 4) {
+        h->dd(0xD2511F53);
+        h->dd(0);
+        h->dd(0xCD9E8D57);
+        h->dd(0);
+    }
+    for (size_t d = 0; d < len; d += 4) {
+        h->dd(0x9E3779B9);
+        h->dd(0x9E3779B9);
+        h->dd(0xBB67AE85);
+        h->dd(0xBB67AE85);
+    }
+    for (size_t d = 0; d < len; d++)
+        h->dd(0x4f000000); // p * UINT32_MAX / 2
+    #else
+
+
     const uint32_t internal_rng_state0[16] = {0x68b46ad5, 0x51a0a11b,
             0x9b531a7c, 0xa247d1b2, 0x303b55b8, 0x92f9e76, 0xc3dc2511,
             0xfac8eedf, 0x9e1be4d5, 0xa70f2f1b, 0x6dfc947c, 0x54e85fb2,
@@ -379,8 +481,9 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
         h->dd(float2int(1.));
     for (size_t d = 0; d < len; d++)
         h->dd(0x3f800000);
+#endif
     for (size_t d = 0; d < len; d++)
-        h->dd(float2int(1.));
+        h->dd(float2int(1.)); // scale
     if (is_avx512) {
         for (size_t d = 0; d < len; d++)
             h->dd(0x01010101);
@@ -397,7 +500,23 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
 
 template <cpu_isa_t isa, typename Wmm>
 void jit_uni_dropout_injector_f32<isa, Wmm>::load_rng_state(size_t state0_idx,
-        size_t state1_idx, size_t state2_idx, size_t state3_idx, Reg32& seed, Reg32& p, Reg32& scale) {
+        size_t state1_idx, size_t state2_idx, size_t state3_idx, Reg64& seed, Reg32& p, Reg32& scale) {
+#ifdef PHILLOX
+    vmm_state0 = Vmm(state0_idx);
+    vmm_state1 = Vmm(state1_idx);
+    vmm_state2 = Vmm(state2_idx);
+    h->uni_vpbroadcastd(vmm_state0, scale);
+    h->uni_vpbroadcastd(vmm_state1, p);
+
+    //h->uni_vpbroadcastq(vmm_state2, seed);
+
+    h->uni_vpshufd(vmm_state2, vmm_state2, 0x50);
+
+    h->uni_vmovups(h->ptr[p_table + vlen * 5], vmm_state0);
+    h->uni_vmovups(h->ptr[p_table + vlen * 4], vmm_state1);
+    //h->uni_vmovups(h->ptr[p_table + vlen], vmm_state2);
+
+#else
     vmm_state0 = Vmm(state0_idx);
     vmm_state1 = Vmm(state1_idx);
     vmm_state2 = Vmm(state2_idx);
@@ -414,7 +533,7 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::load_rng_state(size_t state0_idx,
     //h->uni_vaddps(vmm_state1, vmm_state1, vmm_state2);
     h->uni_vmovups(h->ptr[p_table + vlen * 10], vmm_state1);
 
-    h->uni_vpbroadcastd(vmm_state3, seed);
+    h->uni_vpbroadcastd(vmm_state3, Reg32(seed.getIdx()));
 
     h->uni_vpmulld(vmm_state0, vmm_state3, h->ptr[p_table + vlen]);
     h->uni_vpmulld(vmm_state1, vmm_state3, h->ptr[p_table + vlen * 1]);
@@ -425,7 +544,7 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::load_rng_state(size_t state0_idx,
     h->uni_vxorps(vmm_state1, vmm_state1, h->ptr[p_table + vlen * 5]);
     h->uni_vxorps(vmm_state2, vmm_state2, h->ptr[p_table + vlen * 6]);
     h->uni_vxorps(vmm_state3, vmm_state3, h->ptr[p_table + vlen * 7]);
-
+#endif
 }
 
 template struct jit_uni_dropout_injector_f32<avx512_core_fp16>;

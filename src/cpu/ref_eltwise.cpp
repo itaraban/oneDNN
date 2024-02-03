@@ -106,6 +106,8 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
     const int ndims = pd()->ndims();
     bool with_drop_out = pd()->attr()->drop_out_.enabled;
     const auto p = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY);
+    const auto seed = CTX_IN_MEM(const uint32_t *, DNNL_ARG_ATTR_DROPOUT_SEED);
+    #ifndef PHILLOX
     ref_dropout_fwd_t ref_dropout(*p, pd()->get_prop_kind());
 
     if (with_drop_out) {
@@ -123,7 +125,7 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
                 ref_dropout2.compute_rand(drop_mask, mask_d.off_l(i));
         });
     }
-
+    #endif
     parallel_nd(
             MB, C, D, H, W, [&](dim_t n, dim_t c, dim_t d, dim_t h, dim_t w) {
                 auto data_p_off = DATA_OFF(src_d, n, c, d, h, w);
@@ -136,8 +138,13 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_generic(
                 args.l_offset = data_l_off;
                 args.dst_md = pd()->dst_md();
                 if (with_drop_out)
+#ifdef PHILLOX
+                    res = ref_dropout(
+                            res, drop_mask, DATA_OFF(mask_d, n, c, d, h, w), *p, *seed);
+                    #else
                     res = ref_dropout.apply_scalar(
                             res, drop_mask, DATA_OFF(mask_d, n, c, d, h, w));
+#endif
                 ref_post_ops->execute(res, args);
                 dst[data_p_off] = cpu::saturate_and_round<data_t>(res);
             });
@@ -169,8 +176,9 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
     drop_mask = (drop_mask) ? drop_mask + src_d.offset0() : drop_mask;
     const auto p = CTX_IN_MEM(const float *, DNNL_ARG_ATTR_DROPOUT_PROBABILITY);
     const auto seed = CTX_IN_MEM(const uint32_t *, DNNL_ARG_ATTR_DROPOUT_SEED);
+#ifndef PHILLOX
     ref_dropout_fwd_t ref_dropout(*p, pd()->get_prop_kind(), *seed);
-
+#endif
     // a fast path for relu as the most popular activation
     if (alg_kind == alg_kind::eltwise_relu && alpha == 0 && !with_drop_out) {
         parallel_nd(nelems, [&](dim_t e) {
@@ -181,6 +189,7 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
         });
         return status::success;
     }
+#ifndef PHILLOX
     if (with_drop_out) {
         const dim_t parts = dnnl_get_current_num_threads();
         const dim_t min_part_size = nstl::min(nelems, (dim_t)5);
@@ -199,10 +208,14 @@ status_t ref_eltwise_fwd_t<data_type>::execute_forward_dense(
                 ref_dropout2.compute_rand(drop_mask, i);
         });
     }
+#endif
     parallel_nd(nelems, [&](dim_t e) {
         float res = compute_eltwise_scalar_fwd(alg_kind, src[e], alpha, beta);
-
+#ifndef PHILLOX
         if (with_drop_out) res = ref_dropout.apply_scalar(res, drop_mask, e);
+#else
+        if (with_drop_out) res = ref_dropout(res, drop_mask, e, *p, *seed);
+#endif
         dst[e] = cpu::saturate_and_round<data_t>(res);
     });
     return status::success;

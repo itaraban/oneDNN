@@ -99,8 +99,15 @@ private:
     std::random_device rd;
     std::mt19937 gen;
     std::bernoulli_distribution d;
+    int seed;
     bool training;
 };
+
+
+#define PHILLOX
+
+float ref_dropout(float src, uint8_t *mask, dim_t offset, double p, int seed);
+
 
 } // namespace cpu
 } // namespace impl

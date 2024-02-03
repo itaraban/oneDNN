@@ -63,16 +63,16 @@ struct jit_uni_dropout_injector_f32 {
 
    // void compute_vector_range(size_t start_idx, size_t end_idx);
     void compute_vector_range(const injector_utils::vmm_index_set_t &vmm_idxs,
-            const Xbyak::Address &mask_raw_addr,
+            const Xbyak::Address &mask_raw_addr, const Xbyak::Reg64 &reg_offset,
             bool tail);
-    void compute_vector(size_t src_idx,
-            const Xbyak::Address &mask_raw_addr,             bool tail) {
-        compute_vector_range({src_idx}, mask_raw_addr, tail);
+    void compute_vector(size_t src_idx, const Xbyak::Address &mask_raw_addr,
+            const Xbyak::Reg64 &reg_offset, bool tail) {
+        compute_vector_range({src_idx}, mask_raw_addr, reg_offset, tail);
     }
     void prepare_table(bool gen_table = true);
     void load_table_addr() { h->mov(p_table, l_table); }
     void load_rng_state(size_t state0_idx, size_t state1_idx, size_t state2_idx,
-            size_t state3_idx, Xbyak::Reg32 &seed, Xbyak::Reg32 &p,
+            size_t state3_idx, Xbyak::Reg64 &seed, Xbyak::Reg32 &p,
             Xbyak::Reg32 &scale);
 
 private:
@@ -105,7 +105,8 @@ private:
     void compute_body(
             const injector_utils::vmm_index_set_iterator_t &start_idx_it,
             const injector_utils::vmm_index_set_iterator_t &end_idx_it,
-            const Xbyak::Address &mask_raw_addr, bool tail);
+            const Xbyak::Address &mask_raw_addr, const Xbyak::Reg64 &reg_offset,
+            bool tail);
     void injector_preamble(const injector_utils::vmm_index_set_t &vmm_idxs);
     void injector_preamble_tail(
             const injector_utils::vmm_index_set_iterator_t &start_idx_it);

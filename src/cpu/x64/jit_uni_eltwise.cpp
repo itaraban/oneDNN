@@ -46,6 +46,7 @@ struct jit_args_t {
     float p;
     float scale;
     size_t work_amount;
+    size_t start;
 };
 
 struct jit_uni_eltwise_kernel : public jit_generator {
@@ -115,7 +116,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         eltwise_injector_->compute_vector(vmm_src.getIdx());
         if (with_dropout_) {
             dropout_injector_->compute_vector(
-                    vmm_src.getIdx(), ptr[reg_drop_mask], tail);
+                    vmm_src.getIdx(), ptr[reg_drop_mask], reg_start, tail);
         }
         if (!is_fwd_) {
             io_[data_type()]->load(ptr[reg_diff_dst], vmm_diff_dst, tail);
@@ -141,8 +142,8 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
                     = i == 0 ? vmm_diff_dst_even : vmm_diff_dst_odd;
             eltwise_injector_->compute_vector(vsrc.getIdx());
             if (with_dropout_) {
-                dropout_injector_->compute_vector(
-                        vsrc.getIdx(), ptr[reg_drop_mask + i * vlen_], tail);
+                dropout_injector_->compute_vector(vsrc.getIdx(),
+                        ptr[reg_drop_mask + i * vlen_], reg_start, tail);
             }
             if (!is_fwd_) uni_vmulps(vsrc, vsrc, vdiff_dst);
             io_[data_type()]->store(vsrc, ptr[reg_dst + i * vlen_], tail);
@@ -187,9 +188,10 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             compute_dst(false);
             add(reg_src, vlen_);
             add(reg_dst, vlen_);
-            add(reg_drop_mask, cpu_isa_traits<isa>::vlen / sizeof(uint32_t));
+            add(reg_drop_mask, vlen_ / sizeof(uint32_t));
             if (!is_fwd_) add(reg_diff_dst, vlen_);
 
+            if (with_dropout_) add(reg_start, vlen_ / sizeof(uint32_t));
             sub(reg_work_amount, simd_w_);
             cmp(reg_work_amount, simd_w_);
             jge(vectorized_loop_start, T_NEAR);
@@ -207,6 +209,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
             if (!is_fwd_) add(reg_diff_dst, dtype_size());
 
             dec(reg_work_amount);
+            if (with_dropout_) inc(reg_start);
             jmp(reminder_loop_start, T_NEAR);
         }
         L(loop_end);
@@ -226,6 +229,7 @@ struct jit_uni_kernel_t : public jit_uni_eltwise_kernel {
         mov(reg_work_amount, ptr[param + GET_OFF(work_amount)]);
         eltwise_injector_->load_table_addr();
         if (with_dropout_) {
+            mov(reg_start, ptr[param + GET_OFF(start)]);
             mov(reg_drop_mask, ptr[param + GET_OFF(drop_mask)]);
             mov(reg_dropout_seed, ptr[param + GET_OFF(seed)]);
             mov(reg_dropout_p, ptr[param + GET_OFF(p)]);
@@ -270,9 +274,10 @@ private:
     Reg64 reg_injector_table = r9;
     Reg64 reg_drop_injector_table = r11;
     Reg64 reg_drop_mask = r12;
-    Reg32 reg_dropout_seed = r13d;
+    Reg64 reg_dropout_seed = r13;
     Reg32 reg_dropout_p = r14d;
     Reg32 reg_dropout_scale = r10d;
+    Reg64 reg_start = rdi;
     Reg64 reg_diff_dst = r10;
     Reg64 reg_work_amount = rsi;
     Reg64 imm_addr64 = rbx;
@@ -383,8 +388,9 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::execute(
         args.drop_mask = (drop_mask) ? drop_mask + start : nullptr;
         args.diff_dst = nullptr;
         args.work_amount = end - start;
+        args.start = start;
         args.seed = (seed_p) ? *seed_p + start : 0;
-        args.p = (p_p) ? *p_p + 1 : 0;
+        args.p = (p_p) ? *p_p * static_cast<float>(0x7FFFFFFF) : 0;
         args.scale = (p_p) ? (1 / (1 - *p_p)) : 0;
         (*kernel_)(&args);
     });
