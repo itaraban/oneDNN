@@ -277,7 +277,7 @@ private:
     Reg64 reg_dropout_seed = r13;
     Reg32 reg_dropout_p = r14d;
     Reg32 reg_dropout_scale = r10d;
-    Reg64 reg_start = rdi;
+    Reg64 reg_start = rbx;
     Reg64 reg_diff_dst = r10;
     Reg64 reg_work_amount = rsi;
     Reg64 imm_addr64 = rbx;

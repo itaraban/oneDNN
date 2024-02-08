@@ -139,14 +139,13 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
     std::for_each(start_idx_it, end_idx_it, [&](size_t idx) {
 #define PHILLOX
 #ifdef PHILLOX
-
         h->uni_vpbroadcastd(vmm_mask, Reg32(reg_offset.getIdx())); // counter
 
         h->uni_vpaddd(vmm_mask, vmm_mask, h->ptr[p_table]);
 
         if (is_avx512) {
             //0x
-            h->kmovq(k_mask, h->ptr[p_table + vlen * 6]);
+            h->kmovq(k_mask, h->ptr[p_table + vlen * 7]);
         }
         h->uni_vmovups(vmm_aux1, h->ptr[p_table + vlen]); // seed
 
@@ -154,15 +153,17 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
             h->vpmuludq(vmm_aux0, vmm_mask, h->ptr[p_table + vlen * 2]);
             h->uni_vpshufd(vmm_aux0, vmm_aux0, 0x4E);
             if (is_avx512) {
-                h->vpternlogd(vmm_mask | k_mask, vmm_aux0, vmm_aux1,
+                h->vpternlogd(vmm_aux0 | k_mask, vmm_mask, vmm_aux1,
                         0x96);
+                h->uni_vpshufd(vmm_mask, vmm_aux0, 0xB1);
             } else {
                 h->uni_vxorps(vmm_mask, vmm_mask, vmm_aux1);
                 h->uni_vxorps(vmm_mask, vmm_mask, vmm_aux0);
                 
                 h->uni_vblendps(vmm_mask, vmm_mask, vmm_aux0, 0x55);
+                h->uni_vpshufd(vmm_mask, vmm_mask, 0xB1);
             }
-            h->uni_vpshufd(vmm_mask, vmm_mask, 0xB1);
+            
             if (i < 9) {
                 h->uni_vpaddd(vmm_aux1, vmm_aux1, h->ptr[p_table + vlen * 3]);
             }
@@ -176,7 +177,7 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
             //        h->ptr[p_table + vlen * 4]); // generate mask
                 h->uni_vmulps(Vmm(idx) | k_mask | h->T_z, Vmm(idx),
                         h->ptr[p_table + vlen * 5]); // v * scale with mask
-                h->uni_vmovups(vmm_aux0, h->ptr[p_table + vlen * 7]);
+                h->uni_vmovups(vmm_aux0, h->ptr[p_table + vlen * 6]);
                 h->vmovdqu8(vmm_mask,
                         vmm_aux0 | k_mask | h->T_z); // write mask to drop_mask
 
@@ -211,6 +212,7 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::compute_body(
                 }
             }
         }
+        
 #else
         h->uni_vpaddd(vmm_aux0, vmm_state0, vmm_state3);
         h->uni_vpsrld(vmm_aux0, vmm_aux0, 9);
@@ -487,6 +489,7 @@ void jit_uni_dropout_injector_f32<isa, Wmm>::prepare_table(bool gen_table) {
     if (is_avx512) {
         for (size_t d = 0; d < len; d++)
             h->dd(0x01010101);
+        h->dw(0xAAAAAAAA); // op_mask
     } else {
         for (size_t d = 0; d < len; d++)
             h->dd(1);
