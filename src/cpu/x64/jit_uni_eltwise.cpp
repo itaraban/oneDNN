@@ -338,7 +338,7 @@ status_t jit_uni_eltwise_fwd_t<isa, d_type>::pd_t::init(engine_t *engine) {
             && set_default_formats_common()
             && src_d == memory_desc_wrapper(dst_md())
             && IMPLICATION(attr_.drop_out_.enabled,
-                    mask_d.similar_to(src_d, true, false));
+                    src_md()->data_type == data_type::f32 && mask_d.similar_to(src_d, true, false));
     return ok ? status::success : status::unimplemented;
 }
 
