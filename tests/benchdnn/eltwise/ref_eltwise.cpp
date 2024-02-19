@@ -23,8 +23,11 @@ namespace eltwise {
 void compute_ref_fwd(const prb_t *prb, const args_t &args) {
     const dnn_mem_t &src = args.find(DNNL_ARG_SRC);
     const dnn_mem_t &dst = args.find(DNNL_ARG_DST);
+    const dnn_mem_t &drop_out = args.find(DNNL_ARG_ATTR_DROPOUT_MASK);
 
     float *dst_ptr = (float *)dst;
+    float *drop_out_ptr
+            = (prb->attr.dropout.p > 0.0) ? (float *)drop_out : NULL;
 
     const auto nelems = src.nelems();
     auto v_po_masks = prb->attr.post_ops.get_po_masks();
@@ -35,10 +38,8 @@ void compute_ref_fwd(const prb_t *prb, const args_t &args) {
                 prb->alg, src.get_elem(i), prb->alpha, prb->beta);
 
         const auto v_po_vals = prepare_po_vals(dst, args, v_po_masks, i);
-
+        maybe_drop_out(prb->attr, res, i, drop_out_ptr);
         maybe_post_ops(prb->attr, res, 0.f, v_po_vals);
-
-        if (fwd_dropout)  res = res / (1 - prb->attr.dropout.p);
 
         // Backward use_dst case requires data adjustment since lower data type
         // may have less exact values which will be propagated further.

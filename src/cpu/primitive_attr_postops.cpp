@@ -417,8 +417,9 @@ float ref_dropout_fwd_t::apply_scalar(float s, uint8_t *mask, dim_t offset) {
     } else
         return s;
 }
-float ref_dropout(float src, uint8_t* mask, dim_t offset, double p, int seed) {
-    double q = 1 - p;
+float ref_dropout(
+        float src, uint8_t *mask, dim_t offset, float p, int64_t seed) {
+    float q = 1 - p;
     uint8_t m = phillox_bernoulli(p, seed, offset);
     mask[offset] = m;
     return (m) ? src / q : 0;

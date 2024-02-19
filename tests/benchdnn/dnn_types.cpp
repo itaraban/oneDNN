@@ -17,7 +17,6 @@
 #include <assert.h>
 #include <cctype>
 #include <cmath>
-#include <random>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1466,6 +1465,76 @@ float compute_binary(pk_t kind, float src0, float src1) {
         assert(!"operation not supported!");
     }
     return NAN;
+}
+
+void maybe_drop_out(
+        const attr_t &attr, float &val, int64_t offset, float *drop_mask) {
+
+    auto phillox_bernoulli = [](float p, int seed, int64_t d) {
+        auto _philox4x32round = [](uint32_t *ctr, uint32_t *key) {
+            auto mulhilo32
+                    = [](uint32_t a, uint32_t b, uint32_t &hi, uint32_t &lo) {
+                          const uint64_t product = static_cast<uint64_t>(a) * b;
+                          lo = static_cast<uint32_t>(product);
+                          hi = static_cast<uint32_t>(product >> 32);
+                      };
+            const static uint32_t PHILOX_M4x32_0 = 0xD2511F53;
+            const static uint32_t PHILOX_M4x32_1 = 0xCD9E8D57;
+            uint32_t hi0, lo0;
+            uint32_t hi1, lo1;
+            mulhilo32(PHILOX_M4x32_0, ctr[0], hi0, lo0);
+            mulhilo32(PHILOX_M4x32_1, ctr[2], hi1, lo1);
+            ctr[0] = hi1 ^ ctr[1] ^ key[0];
+            ctr[1] = lo1;
+            ctr[2] = hi0 ^ ctr[3] ^ key[1];
+            ctr[3] = lo0;
+        };
+
+        auto _philox4x32bumpkey = [](uint32_t *key) {
+            const static uint32_t PHILOX_W4x32_0 = 0x9E3779B9;
+            const static uint32_t PHILOX_W4x32_1 = 0xBB67AE85;
+            key[0] += PHILOX_W4x32_0;
+            key[1] += PHILOX_W4x32_1;
+        };
+
+        uint32_t x = (d >> 2) << 2;
+        uint32_t ctr[4] = {0};
+        uint32_t key[2] = {0};
+        ctr[0] = x;
+        ctr[1] = x + 1;
+        ctr[2] = x + 2;
+        ctr[3] = x + 3;
+        key[0] = seed;
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        _philox4x32bumpkey(key);
+        _philox4x32round(ctr, key);
+        return (ctr[d % 4] > std::numeric_limits<uint32_t>::max() * p);
+    };
+
+    if (!drop_mask) return;
+
+    float p = attr.dropout.p;
+    int seed = attr.dropout.seed;
+    float q = 1 - p;
+    uint8_t m = phillox_bernoulli(p, seed, offset);
+    drop_mask[offset] = m;
+    val = (m) ? val / q : 0;
 }
 
 void maybe_post_ops(const attr_t &attr, float &val, float sum_val,

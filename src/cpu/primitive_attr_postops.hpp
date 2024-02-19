@@ -106,7 +106,7 @@ private:
 
 #define PHILLOX
 
-float ref_dropout(float src, uint8_t *mask, dim_t offset, double p, int seed);
+float ref_dropout(float src, uint8_t *mask, dim_t offset, float p, int64_t seed);
 
 
 } // namespace cpu

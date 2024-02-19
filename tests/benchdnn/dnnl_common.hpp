@@ -718,16 +718,7 @@ void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
     }
 
     if ((prb->dir & FLAG_FWD && !(prb->dir & FLAG_INF))
-        && prb->attr.dropout.p > 0.0) {
-        //const auto &dst_md = query_md(const_pd, DNNL_ARG_DST);
-        //auto drop_dt = dst_md;
-        //const auto ndims = query_md_ndims(dst_md);
-        //dnnl_dims_t dims = {0};
-        //for (int d = 0; d < ndims; ++d) {
-        //    dims[d] = query_md_dims(dst_md)[d];
-        //}
-        //mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_MASK,
-        //        dnn_mem_t(ndims, dims, dnnl_u8, tag::axb, test_engine));
+            && prb->attr.dropout.p > 0.0) {
         const auto &dst_md = query_md(const_pd, DNNL_ARG_DST);
         const auto ndims = query_md_ndims(dst_md);
         const auto dims = query_md_dims(dst_md);
@@ -736,20 +727,12 @@ void init_memory_args(dnn_mem_map_t &mem_map, const prb_t *prb,
                         test_engine));
         int64_t count = 1;
         auto prob_md = dnn_mem_t::init_md(1, &count, dnnl_f32, tag::abx);
-        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_PROBABILITY, dnn_mem_t(prob_md, test_engine));
+        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_PROBABILITY,
+                dnn_mem_t(prob_md, test_engine));
 
         auto seed_md = dnn_mem_t::init_md(1, &count, dnnl_s32, tag::abx);
-        mem_map.emplace(DNNL_ARG_ATTR_DROPOUT_SEED,
-                dnn_mem_t(seed_md, test_engine));
-
-       // const auto &drop_md = query_md(const_pd, DNNL_ARG_ATTR_DROPOUT_MASK);
-        //dnn_mem_t drop_m =;
-        //dnnl_memory_desc_set_data_type(md_, dnnl_u8);
-        //.set_dt(dnnl_u8);
-       // mem_map.emplace(
-       //         DNNL_ARG_ATTR_DROPOUT_MASK, dnn_mem_t(drop_md, test_engine));
-        //mem_map[DNNL_ARG_ATTR_DROPOUT_MASK].set_dt(dnnl_u8);
-
+        mem_map.emplace(
+                DNNL_ARG_ATTR_DROPOUT_SEED, dnn_mem_t(seed_md, test_engine));
     }
 
     // Scales.

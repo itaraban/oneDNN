@@ -607,6 +607,8 @@ float compute_eltwise_fwd(
 float compute_eltwise_bwd(attr_t::post_ops_t::kind_t kind, float d_dst,
         float src, float alpha, float beta);
 float compute_binary(attr_t::post_ops_t::kind_t kind, float src0, float src1);
+void maybe_drop_out(
+        const attr_t &attr, float &val, int64_t offset, float *drop_mask);
 void maybe_post_ops(const attr_t &attr, float &val, float sum_val,
         const std::vector<float> &v_po_vals);
 inline void maybe_post_ops(
